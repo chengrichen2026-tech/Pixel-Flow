@@ -1,6 +1,6 @@
 # Pixel Flow
 
-Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布。它复用浏览器中已登录的 ChatGPT，通过节点组织图片、文字、生成任务和结果。
+Pixel Flow 是一个基于 Chrome Manifest V3 的 AI 创意任务画布，通过节点组织图片、文字、生成任务和结果。它兼容两种生图方式：浏览器模式复用已登录的 ChatGPT 网页账号；API Key 模式通过本机 Pixel Flow API Worker 调用已配置的图片接口。每张任务卡都可以独立选择模式。
 
 ## 开发
 

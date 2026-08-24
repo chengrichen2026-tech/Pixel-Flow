@@ -2,8 +2,16 @@ Pixel Flow v0.2.6｜使用说明
 =============================
 
 Pixel Flow 是一个 Chrome / Edge 本地扩展。
-它使用你已经登录的 ChatGPT 网页账号，把图片、文字、任务和结果组织在无限画布中。
-不需要 API Key，也不需要安装编程软件。
+它把图片、文字、任务和结果组织在无限画布中，并兼容浏览器模式和 API Key 模式。
+
+浏览器模式：
+- 需要一个已登录并能正常使用的 ChatGPT 网页账号。
+- 不需要 API Key、Node.js 或运行命令。
+
+API Key 模式：
+- 需要可用于 aihub.rbmanon.cn 的 API Key。
+- 需要 Node.js 20 或更高版本，并安装运行 Pixel Flow API Worker。
+- 不需要登录 ChatGPT 网页账号。
 
 一、安装前
 ----------
