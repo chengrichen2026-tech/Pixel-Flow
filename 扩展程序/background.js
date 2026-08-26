@@ -6962,6 +6962,26 @@ async function rememberActiveTab(key, tabId) {
   });
 }
 var API_WORKER_URL = "http://127.0.0.1:43129";
+var API_POLL_ALARM_NAME = "pixel-flow-api-poll";
+var API_POLL_DELAY_MINUTES = 0.5;
+var API_ACTIVE_STATUSES = /* @__PURE__ */ new Set(["sending", "generating", "uploading", "waiting_page"]);
+var apiPollCyclePromise;
+function scheduleApiPoll() {
+  try {
+    const result = chrome.alarms?.create?.(API_POLL_ALARM_NAME, { delayInMinutes: API_POLL_DELAY_MINUTES });
+    if (result?.catch) void result.catch(() => {
+    });
+  } catch {
+  }
+}
+function clearApiPollAlarm() {
+  try {
+    const result = chrome.alarms?.clear?.(API_POLL_ALARM_NAME);
+    if (result?.catch) void result.catch(() => {
+    });
+  } catch {
+  }
+}
 async function apiWorkerRequest(path, options = {}) {
   let response;
   try {
@@ -6973,13 +6993,118 @@ async function apiWorkerRequest(path, options = {}) {
   if (!response.ok) throw new Error(payload.error || `本机 API 任务服务返回 HTTP ${response.status}`);
   return payload;
 }
-async function waitForApiWorkerJob(jobId) {
-  while (true) {
-    const job = await apiWorkerRequest(`/jobs/${jobId}`);
-    if (job.status === "completed") return job.images || [];
-    if (job.status === "failed") throw new Error(job.error || "API 生图失败");
-    await new Promise((resolve) => setTimeout(resolve, 2e3));
+async function getApiTaskItem(projectId, taskId, key = createTaskScopeKey(projectId, taskId)) {
+  const project = await projectRepository.loadProject(projectId);
+  const task = project?.graph.nodes.find(
+    (node) => node.id === taskId && node.kind === "task"
+  );
+  if (!project || !task || task.generationMode === "browser" || !task.apiJobId || !API_ACTIVE_STATUSES.has(task.status)) return void 0;
+  return { key, projectId, taskId, apiJobId: task.apiJobId };
+}
+async function getActiveApiTaskItems() {
+  await schedulerReady;
+  const items = /* @__PURE__ */ new Map();
+  for (const key of queue.running) {
+    const scope = pendingScopes.get(key) ?? parseTaskScopeKey(key);
+    if (!scope) continue;
+    const item = await getApiTaskItem(scope.projectId, scope.taskId, key);
+    if (item) items.set(key, item);
   }
+  for (const project of await projectRepository.listProjects()) {
+    for (const task of project.graph.nodes) {
+      if (task.kind !== "task" || task.generationMode === "browser" || !task.apiJobId || !API_ACTIVE_STATUSES.has(task.status)) continue;
+      const key = createTaskScopeKey(project.id, task.id);
+      items.set(key, { key, projectId: project.id, taskId: task.id, apiJobId: task.apiJobId });
+    }
+  }
+  return [...items.values()];
+}
+async function completeApiWorkerJob(item, images) {
+  const handled = await updateScheduler(async () => {
+    const current = await getApiTaskItem(item.projectId, item.taskId, item.key);
+    if (!current || current.apiJobId !== item.apiJobId) return false;
+    if (queue.running.includes(item.key)) {
+      queue = complete(queue, item.key);
+    } else {
+      queue = cancelTask(queue, item.key);
+    }
+    pendingScopes.delete(item.key);
+    await removeActiveScope(item.key);
+    await persistAndBroadcast({ type: "TASK_RESULT", projectId: item.projectId, taskId: item.taskId, images, responseText: "" });
+    return true;
+  });
+  if (!handled) return false;
+  void apiWorkerRequest(`/jobs/${item.apiJobId}`, { method: "DELETE" }).catch(() => {
+  });
+  await chrome.notifications.create(createTaskNotificationId(item.projectId, item.taskId), {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("icon.svg"),
+    title: "API 生图完成",
+    message: `已生成 ${images.length} 张图片`
+  });
+  return true;
+}
+async function failApiWorkerJob(item, detail) {
+  const handled = await updateScheduler(async () => {
+    const current = await getApiTaskItem(item.projectId, item.taskId, item.key);
+    if (!current || current.apiJobId !== item.apiJobId) return false;
+    if (queue.running.includes(item.key)) {
+      queue = fail(queue, item.key, "api_error");
+    } else {
+      queue = cancelTask(queue, item.key);
+    }
+    pendingScopes.delete(item.key);
+    await removeActiveScope(item.key);
+    await persistAndBroadcast({
+      type: "TASK_ERROR",
+      projectId: item.projectId,
+      taskId: item.taskId,
+      reason: "api_error",
+      detail
+    });
+    return true;
+  });
+  return handled;
+}
+async function pollApiWorkerJob(item) {
+  try {
+    const job = await apiWorkerRequest(`/jobs/${item.apiJobId}`);
+    if (job.status === "completed") {
+      await completeApiWorkerJob(item, job.images || []);
+      return false;
+    }
+    if (job.status === "failed") {
+      await failApiWorkerJob(item, job.error || "API 生图失败");
+      return false;
+    }
+    return true;
+  } catch (error) {
+    await failApiWorkerJob(item, error instanceof Error ? error.message : "API 生图失败");
+    return false;
+  }
+}
+async function processApiPollCycle() {
+  if (apiPollCyclePromise) return apiPollCyclePromise;
+  apiPollCyclePromise = (async () => {
+    const items = await getActiveApiTaskItems();
+    let hasRunningJob = false;
+    for (const item of items) {
+      if (await pollApiWorkerJob(item)) hasRunningJob = true;
+    }
+    if (hasRunningJob || (await getActiveApiTaskItems()).length > 0) {
+      scheduleApiPoll();
+    } else {
+      clearApiPollAlarm();
+    }
+  })().finally(() => {
+    apiPollCyclePromise = void 0;
+  });
+  return apiPollCyclePromise;
+}
+if (chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === API_POLL_ALARM_NAME) void processApiPollCycle();
+  });
 }
 async function executeApiTask(projectId, taskId, project, task) {
   const key = createTaskScopeKey(projectId, taskId);
@@ -6988,7 +7113,7 @@ async function executeApiTask(projectId, taskId, project, task) {
     if (typeof pixelFlowApiKey !== "string" || !pixelFlowApiKey.trim()) {
       throw new Error("请先点击顶部“API 设置”并保存 API Key");
     }
-    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "sending", detail: task.apiJobId ? "正在重连本机 API 任务" : "正在向本机 API 任务服务提交请求" });
+    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "sending", detail: void 0 });
     const inputs = getTaskInputs(project.graph, taskId);
     const text = inputs.filter((input) => input.node.kind === "text").map((input) => input.node.kind === "text" ? input.node.text : "").filter(Boolean);
     const imageBlobs = await Promise.all(
@@ -7020,24 +7145,9 @@ async function executeApiTask(projectId, taskId, project, task) {
       });
       jobId = submitted.id;
     }
-    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", detail: "API 任务已由本机服务持久执行，扩展重载后可恢复", apiJobId: jobId });
-    const images = await waitForApiWorkerJob(jobId);
-    const handled = await updateScheduler(async () => {
-      if (!queue.running.includes(key)) return false;
-      await persistAndBroadcast({ type: "TASK_RESULT", projectId, taskId, images, responseText: "" });
-      queue = complete(queue, key);
-      pendingScopes.delete(key);
-      await removeActiveScope(key);
-      return true;
-    });
-    if (!handled) return;
-    void apiWorkerRequest(`/jobs/${jobId}`, { method: "DELETE" }).catch(() => {});
-    await chrome.notifications.create(createTaskNotificationId(projectId, taskId), {
-      type: "basic",
-      iconUrl: chrome.runtime.getURL("icon.svg"),
-      title: "API 生图完成",
-      message: `已生成 ${images.length} 张图片`
-    });
+    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", detail: void 0, apiJobId: jobId });
+    scheduleApiPoll();
+    void processApiPollCycle();
   } catch (error) {
     const handled = await updateScheduler(async () => {
       if (!queue.running.includes(key)) return false;
@@ -7064,7 +7174,7 @@ async function executeTask(projectId, taskId) {
       (node) => node.id === taskId && node.kind === "task"
     );
     if (!project || !task) throw new Error("\u627E\u4E0D\u5230\u672C\u5730\u4EFB\u52A1");
-    if (task.generationMode === "api") {
+    if (task.generationMode !== "browser") {
       await executeApiTask(projectId, taskId, project, task);
       return;
     }
@@ -7153,12 +7263,12 @@ async function recoverInterruptedApiTasks() {
     if (!scope) continue;
     const project = await projectRepository.loadProject(scope.projectId);
     const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
-    if (task?.generationMode === "api") interruptedByKey.set(key, { key, ...scope });
+    if (task?.generationMode !== "browser") interruptedByKey.set(key, { key, ...scope });
   }
   const activeStatuses = new Set(["sending", "generating", "uploading", "waiting_page"]);
   for (const project of await projectRepository.listProjects()) {
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || task.generationMode !== "api" || !activeStatuses.has(task.status)) continue;
+      if (task.kind !== "task" || task.generationMode === "browser" || !activeStatuses.has(task.status)) continue;
       const key = createTaskScopeKey(project.id, task.id);
       interruptedByKey.set(key, { key, projectId: project.id, taskId: task.id });
     }
@@ -7178,7 +7288,7 @@ async function recoverInterruptedApiTasks() {
           projectId: item.projectId,
           taskId: item.taskId,
           status: "generating",
-          detail: "已重连本机 API 任务，正在继续等待结果",
+          detail: void 0,
           apiJobId: task.apiJobId
         });
         continue;
@@ -7311,7 +7421,7 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   }
   return false;
 });
-void recoverInterruptedApiTasks().then(() => updateScheduler(async () => void 0));
+void recoverInterruptedApiTasks().then(() => updateScheduler(async () => void 0)).then(() => processApiPollCycle());
 chrome.notifications.onClicked.addListener((notificationId) => {
   const url = notificationIdToCanvasUrl(notificationId, chrome.runtime.getURL("index.html"));
   void chrome.tabs.create({ url });

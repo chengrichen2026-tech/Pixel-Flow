@@ -62,6 +62,36 @@ test("API mode submits persistent jobs and reconnects with apiJobId", async () =
   assert.match(manifest, /http:\/\/127\.0\.0\.1:43129\/\*/);
 });
 
+test("API mode is the default unless a task explicitly chooses browser mode", async () => {
+  const modeUi = await readFile(new URL("production/generation-mode.js", root), "utf8");
+  const background = await readFile(new URL("public/background.js", root), "utf8");
+  assert.match(modeUi, /generationMode === "browser" \? "browser" : "api"/);
+  assert.match(modeUi, /saveTaskMode\(currentProjectId, currentTaskId, "api"\)/);
+  assert.match(background, /if \(task\.generationMode !== "browser"\)/);
+  assert.doesNotMatch(background, /if \(task\.generationMode === "api"\)/);
+});
+
+test("API mode wakes the MV3 service worker to poll persistent jobs", async () => {
+  const source = await readFile(new URL("public/background.js", root), "utf8");
+  const manifest = await readFile(new URL("public/manifest.json", root), "utf8");
+  assert.match(manifest, /"alarms"/);
+  assert.match(source, /API_POLL_ALARM_NAME = "pixel-flow-api-poll"/);
+  assert.match(source, /chrome\.alarms\.onAlarm\.addListener/);
+  assert.match(source, /void processApiPollCycle\(\)/);
+  assert.match(source, /then\(\(\) => processApiPollCycle\(\)\)/);
+  assert.doesNotMatch(source, /function waitForApiWorkerJob/);
+  assert.doesNotMatch(source, /const images = await waitForApiWorkerJob\(jobId\)/);
+});
+
+test("API mode does not show normal progress as red status detail", async () => {
+  const source = await readFile(new URL("public/background.js", root), "utf8");
+  assert.match(source, /status: "sending", detail: void 0/);
+  assert.match(source, /status: "generating", detail: void 0, apiJobId: jobId/);
+  assert.doesNotMatch(source, /API 任务已由本机服务持久执行/);
+  assert.doesNotMatch(source, /正在向本机 API 任务服务提交请求/);
+  assert.doesNotMatch(source, /已重连本机 API 任务/);
+});
+
 test("switching to browser mode clears inherited API job state", async () => {
   const modeUi = await readFile(new URL("production/generation-mode.js", root), "utf8");
   const background = await readFile(new URL("public/background.js", root), "utf8");
