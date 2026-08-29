@@ -3,6 +3,7 @@
 ## 产品定位
 
 - 本目录是 Pixel Flow 的正式开发目录。
+- 本产品归属于父项目 `Project_07_Pixel创意工具`。
 - Pixel Flow 是 Chrome Manifest V3 AI 创意任务画布，负责图片、提示词、生图任务、批量执行、结果回写和本地资产管理。
 - 先遵守项目根目录 `AGENTS.md`，再遵守本文件。
 
