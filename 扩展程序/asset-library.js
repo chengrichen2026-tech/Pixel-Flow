@@ -898,13 +898,13 @@
     void hydrateThumbs(panel);
   }
 
-  function renderPanelPreservingScroll() {
-    const scrollTop = panel?.querySelector(".pf-library-content")?.scrollTop || 0;
-    renderPanel();
-    requestAnimationFrame(() => {
-      const content = panel?.querySelector(".pf-library-content");
-      if (content) content.scrollTop = scrollTop;
-    });
+  function removeMediaCard(target) {
+    const card = target.closest(".pf-media-item");
+    const grid = card?.closest(".pf-media-grid");
+    if (!card || !grid) return;
+    releaseObjectUrls(card);
+    card.remove();
+    if (!grid.querySelector(".pf-media-item")) grid.innerHTML = '<p class="pf-empty">还没有图片素材</p>';
   }
 
   const thumbObserver = new IntersectionObserver((entries, observer) => {
@@ -1160,7 +1160,7 @@
     }
     if (["media-apply", "media-delete"].includes(action)) {
       const library = readLibrary(); const media = library.media.find((item) => item.id === target.dataset.id);
-      if (action === "media-delete") { library.media = library.media.filter((item) => item.id !== target.dataset.id); saveLibrary(library); renderPanelPreservingScroll(); }
+      if (action === "media-delete") { library.media = library.media.filter((item) => item.id !== target.dataset.id); saveLibrary(library); removeMediaCard(target); }
       else if (media) await applyMedia(media);
     }
     if (action === "media-rename") {

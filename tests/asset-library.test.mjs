@@ -293,14 +293,14 @@ test("product and reference management follow the compact library layout", async
   assert.match(styles, /\.pf-media-management-toolbar\{display:flex;justify-content:flex-end/);
 });
 
-test("deleting media preserves the management panel scroll position", async () => {
+test("deleting media removes only its card without rerendering the panel", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
-  assert.match(source, /function renderPanelPreservingScroll\(\)/);
-  assert.match(source, /querySelector\("\.pf-library-content"\)\?\.scrollTop \|\| 0/);
-  assert.match(source, /requestAnimationFrame\(\(\) => \{/);
-  assert.match(source, /content\.scrollTop = scrollTop/);
+  assert.match(source, /function removeMediaCard\(target\)/);
+  assert.match(source, /const card = target\.closest\("\.pf-media-item"\)/);
+  assert.match(source, /releaseObjectUrls\(card\)/);
+  assert.match(source, /card\.remove\(\)/);
   const deleteBranch = source.slice(source.indexOf('if \(action === "media-delete"\)'), source.indexOf('else if \(media\) await applyMedia'));
-  assert.match(deleteBranch, /renderPanelPreservingScroll\(\)/);
+  assert.match(deleteBranch, /removeMediaCard\(target\)/);
   assert.doesNotMatch(deleteBranch, /renderPanel\(\)/);
 });
 
