@@ -293,6 +293,17 @@ test("product and reference management follow the compact library layout", async
   assert.match(styles, /\.pf-media-management-toolbar\{display:flex;justify-content:flex-end/);
 });
 
+test("deleting media preserves the management panel scroll position", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  assert.match(source, /function renderPanelPreservingScroll\(\)/);
+  assert.match(source, /querySelector\("\.pf-library-content"\)\?\.scrollTop \|\| 0/);
+  assert.match(source, /requestAnimationFrame\(\(\) => \{/);
+  assert.match(source, /content\.scrollTop = scrollTop/);
+  const deleteBranch = source.slice(source.indexOf('if \(action === "media-delete"\)'), source.indexOf('else if \(media\) await applyMedia'));
+  assert.match(deleteBranch, /renderPanelPreservingScroll\(\)/);
+  assert.doesNotMatch(deleteBranch, /renderPanel\(\)/);
+});
+
 test("product management uses bounded 3:2 previews while reference management keeps masonry", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");

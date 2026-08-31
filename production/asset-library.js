@@ -898,6 +898,15 @@
     void hydrateThumbs(panel);
   }
 
+  function renderPanelPreservingScroll() {
+    const scrollTop = panel?.querySelector(".pf-library-content")?.scrollTop || 0;
+    renderPanel();
+    requestAnimationFrame(() => {
+      const content = panel?.querySelector(".pf-library-content");
+      if (content) content.scrollTop = scrollTop;
+    });
+  }
+
   const thumbObserver = new IntersectionObserver((entries, observer) => {
     for (const entry of entries) if (entry.isIntersecting) { observer.unobserve(entry.target); void hydrateThumb(entry.target); }
   }, { rootMargin: "240px 0px" });
@@ -1151,7 +1160,7 @@
     }
     if (["media-apply", "media-delete"].includes(action)) {
       const library = readLibrary(); const media = library.media.find((item) => item.id === target.dataset.id);
-      if (action === "media-delete") { library.media = library.media.filter((item) => item.id !== target.dataset.id); saveLibrary(library); renderPanel(); }
+      if (action === "media-delete") { library.media = library.media.filter((item) => item.id !== target.dataset.id); saveLibrary(library); renderPanelPreservingScroll(); }
       else if (media) await applyMedia(media);
     }
     if (action === "media-rename") {
