@@ -41,7 +41,7 @@ function MediaCard({item,url,selectedTaskId,selectedContainerId}:{item:MediaItem
   const drag = (event: React.DragEvent) => event.dataTransfer.setData(LIBRARY_DRAG_TYPE, JSON.stringify({kind:"media",assetId:item.assetId,name:item.name}));
   const apply = () => selectedContainerId ? s.addExistingAssetToContainer(item.assetId,item.name,selectedContainerId) : s.addExistingAsset(item.assetId,item.name,position,selectedTaskId);
   return <article className="native-library-card native-media-card" draggable onDragStart={drag}>
-    <div>{url?<img src={url} loading="lazy" decoding="async"/>:<span>图片载入中</span>}</div><strong title={item.name}>{item.name}</strong><div className="native-library-tags">{(item.tags||[]).map(tag=><span key={tag}>{tag}</span>)}</div>
+    <div>{url?<img src={url} loading="lazy" decoding="async"/>:<span>图片载入中</span>}</div><strong title={item.name}>{item.name}</strong>
     <footer>{selectedContainerId?<button onClick={()=>void apply()}>放入容器</button>:<><button onClick={()=>void s.addExistingAsset(item.assetId,item.name,position)}>独立放入</button><button disabled={!selectedTaskId} onClick={()=>selectedTaskId&&void s.addExistingAsset(item.assetId,item.name,position,selectedTaskId)}>连接任务</button></>}</footer>
   </article>;
 }

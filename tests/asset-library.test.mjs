@@ -280,6 +280,18 @@ test("prompt, product, and gallery tags are dynamic and editable", async () => {
   assert.match(styles, /\.pf-tag-editor/);
 });
 
+test("product and gallery sidebars keep tag filters without per-image tag badges", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  const nativeSource = await readFile(new URL("src/AssetLibrary.tsx", root), "utf8");
+  const usageMediaList = source.slice(source.indexOf("function mediaUsageList"), source.indexOf("function templateUsageList"));
+  const nativeMediaCard = nativeSource.slice(nativeSource.indexOf("function MediaCard"), nativeSource.indexOf("export default function AssetLibrary"));
+  assert.match(source, /function libraryTagFilters\(library, tab = activeTab\)/);
+  assert.match(source, /aria-label="标签筛选"/);
+  assert.doesNotMatch(usageMediaList, /promptTagBadges\(item\)/);
+  assert.doesNotMatch(nativeMediaCard, /native-library-tags/);
+  assert.match(nativeSource, /className="native-library-filters"/);
+});
+
 test("prompt management uses the compact toolbar layout", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");
