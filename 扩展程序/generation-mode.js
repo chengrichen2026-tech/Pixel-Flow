@@ -154,7 +154,7 @@
       label.title = "生图模式";
       const select = document.createElement("select");
       select.setAttribute("aria-label", "生图模式");
-      select.innerHTML = '<option value="browser">浏览器</option><option value="api">API</option>';
+      select.innerHTML = '<option value="browser">GPT-web</option><option value="api">API</option>';
       select.value = mode;
       select.addEventListener("change", async () => {
         const activeStatus = card.querySelector(".task-status")?.getAttribute("data-status");
@@ -190,12 +190,6 @@
       return;
     }
     const card = button.closest(".task-card");
-    if (card?.querySelector('.task-status[data-status="manual_action"]')) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      card.querySelector('[aria-label="打开真实对话"]')?.click();
-      return;
-    }
     const selectedMode = card?.querySelector(".generation-mode select")?.value;
     const key = `${projectId()}:${taskId(card)}`;
     const pendingModeSave = modeSavePromises.get(key);
@@ -216,6 +210,11 @@
     })();
   }, true);
 
-  new MutationObserver(enhanceAll).observe(document.documentElement, { childList: true, subtree: true });
+  let enhanceFrame = 0;
+  new MutationObserver((mutations) => {
+    if (!mutations.some((mutation) => [...mutation.addedNodes].some((node) => node instanceof Element && (node.matches(".topbar,.task-card") || node.querySelector(".topbar,.task-card"))))) return;
+    cancelAnimationFrame(enhanceFrame);
+    enhanceFrame = requestAnimationFrame(enhanceAll);
+  }).observe(document.body || document.documentElement, { childList: true, subtree: true });
   document.addEventListener("DOMContentLoaded", enhanceAll, { once: true });
 })();

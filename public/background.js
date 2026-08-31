@@ -6227,7 +6227,9 @@ var require_dexie = __commonJS({
 });
 
 // src/domain/queue.ts
-var MAX_CONCURRENCY = 3;
+var MAX_CONCURRENCY = 5;
+var MAX_BROWSER_CONCURRENCY = 5;
+var BROWSER_LAUNCH_GAP_MS = 6e3;
 function emptyQueue() {
   return { waiting: [], running: [], completed: [], failed: {} };
 }
@@ -6270,31 +6272,31 @@ function enqueue(queue2, taskIds) {
       delete failed[taskId];
     }
   }
-  return advance({ ...queue2, waiting, completed, failed });
+  return { ...queue2, waiting, completed, failed };
 }
 function complete(queue2, taskId) {
   if (!queue2.running.includes(taskId)) return queue2;
-  return advance({
+  return {
     ...queue2,
     running: queue2.running.filter((id) => id !== taskId),
     completed: [...queue2.completed, taskId]
-  });
+  };
 }
 function fail(queue2, taskId, reason) {
   if (!queue2.running.includes(taskId)) return queue2;
-  return advance({
+  return {
     ...queue2,
     running: queue2.running.filter((id) => id !== taskId),
     failed: { ...queue2.failed, [taskId]: reason }
-  });
+  };
 }
 function cancelTask(queue2, taskId) {
   if (!queue2.waiting.includes(taskId) && !queue2.running.includes(taskId)) return queue2;
-  return advance({
+  return {
     ...queue2,
     waiting: queue2.waiting.filter((id) => id !== taskId),
     running: queue2.running.filter((id) => id !== taskId)
-  });
+  };
 }
 
 // src/domain/graph.ts
@@ -6317,7 +6319,7 @@ function getTaskInputs(graph, taskId) {
   let textIndex = 0;
   const inputs = [];
   for (const edgeId of task.inputEdgeOrder) {
-    const edge = graph.edges.find((candidate) => candidate.id === edgeId && candidate.target === taskId);
+    const edge = graph.edges.find((candidate) => candidate.id === edgeId && (candidate.target === taskId || candidate.target === task.batchParentTaskId));
     if (!edge) continue;
     const node = findNode(graph, edge.source);
     if (node.kind === "task") continue;
@@ -6334,24 +6336,25 @@ function getTaskInputs(graph, taskId) {
 }
 function appendResult(graph, taskId, imageAssetId) {
   const task = findTask(graph, taskId);
+  const owner = task.batchParentTaskId ? findTask(graph, task.batchParentTaskId) : task;
   const existingResults = graph.edges.filter(
-    (edge) => edge.source === taskId && edge.kind === "output"
+    (edge) => edge.source === owner.id && edge.kind === "output"
   ).length;
   const resultId = makeId("result");
   const result = {
     id: resultId,
     kind: "result",
     assetId: imageAssetId,
-    taskId,
-    title: `\u751F\u6210\u7ED3\u679C ${existingResults + 1}`,
-    position: { x: task.position.x + 560, y: task.position.y + existingResults * 260 }
+    taskId: owner.id,
+    title: `\u751F\u6210\u7ED3\u679C${existingResults + 1}`,
+    position: { x: owner.position.x + 560 + existingResults * 360, y: owner.position.y }
   };
   return {
     ...graph,
     nodes: [...graph.nodes, result],
     edges: [
       ...graph.edges,
-      { id: makeId("edge"), source: taskId, target: resultId, kind: "output" }
+      { id: makeId("edge"), source: owner.id, target: resultId, kind: "output" }
     ]
   };
 }
@@ -6426,6 +6429,18 @@ function updateTask(project, taskId, update) {
     updatedAt: Date.now()
   };
 }
+function updateBatchParent(project, childTaskId, status, detail) {
+  const child = project.graph.nodes.find((node) => node.id === childTaskId && node.kind === "task");
+  if (!child?.batchParentTaskId) return project;
+  return updateTask(project, child.batchParentTaskId, (parent) => {
+    const items = (parent.batchItems || []).map((item) => item.taskId === childTaskId ? { ...item, status, detail } : item);
+    const running = items.some((item) => ["queued", "waiting_page", "uploading", "sending", "generating"].includes(item.status));
+    const failed = items.filter((item) => ["failed", "manual_action"].includes(item.status)).length;
+    const completed = items.filter((item) => item.status === "completed").length;
+    const parentStatus = running ? "generating" : failed ? "failed" : "completed";
+    return { ...parent, batchItems: items, status: parentStatus, statusDetail: failed ? `${completed}/${items.length} 完成，${failed} 项失败` : void 0, runCount: parentStatus === "completed" ? parent.runCount + 1 : parent.runCount };
+  });
+}
 function appendTextResult(graph, taskId, text) {
   const task = graph.nodes.find((node) => node.id === taskId && node.kind === "task");
   if (!task || task.kind !== "task") return graph;
@@ -6455,22 +6470,25 @@ function appendTextResult(graph, taskId, text) {
 async function applyTaskMessage(project, message, saveAsset) {
   if (message.projectId !== project.id) return project;
   if (message.type === "TASK_STATUS") {
-    return updateTask(project, message.taskId, (task) => ({
+    const updated = updateTask(project, message.taskId, (task) => ({
       ...task,
       status: message.status,
       statusDetail: message.detail,
       apiJobId: message.clearApiJobId ? void 0 : message.apiJobId ?? task.apiJobId
     }));
+    return updateBatchParent(updated, message.taskId, message.status, message.detail);
   }
   if (message.type === "TASK_ERROR") {
     const manual = ["login_required", "verification_required", "usage_limited", "conversation_unavailable", "send_interaction_required"].includes(message.reason);
-    return updateTask(project, message.taskId, (task) => ({
+    const status = manual ? "manual_action" : "failed";
+    const updated = updateTask(project, message.taskId, (task) => ({
       ...task,
-      status: manual ? "manual_action" : "failed",
+      status,
       statusDetail: message.detail,
       apiJobId: void 0,
       conversationUrl: message.reason === "conversation_unavailable" ? task.conversationUrl : message.conversationUrl ?? task.conversationUrl
     }));
+    return updateBatchParent(updated, message.taskId, status, message.detail);
   }
   let graph = project.graph;
   for (const image of message.images) {
@@ -6480,7 +6498,7 @@ async function applyTaskMessage(project, message, saveAsset) {
   const hasResponseText = Boolean(message.responseText?.trim());
   if (hasResponseText) graph = appendTextResult(graph, message.taskId, message.responseText);
   const withResults = { ...project, graph, updatedAt: Date.now() };
-  return updateTask(withResults, message.taskId, (task) => ({
+  const updated = updateTask(withResults, message.taskId, (task) => ({
     ...task,
     status: "completed",
     statusDetail: message.images.length || hasResponseText ? void 0 : "\u5DF2\u5B8C\u6210\uFF0C\u4F46\u6CA1\u6709\u751F\u6210\u5185\u5BB9",
@@ -6489,10 +6507,11 @@ async function applyTaskMessage(project, message, saveAsset) {
     conversationUrl: message.conversationUrl ?? task.conversationUrl,
     lastResponseText: message.responseText
   }));
+  return updateBatchParent(updated, message.taskId, "completed", void 0);
 }
 
 // src/shared/protocol.ts
-var CHATGPT_ADAPTER_VERSION = 15;
+var CHATGPT_ADAPTER_VERSION = 25;
 var taskTypes = /* @__PURE__ */ new Set([
   "RUN_TASK",
   "CANCEL_TASK",
@@ -6505,6 +6524,7 @@ var taskTypes = /* @__PURE__ */ new Set([
   "DOWNLOAD_ASSET",
   "SHOW_NOTIFICATION",
   "CHECK_CHATGPT_ADAPTER",
+  "RESUME_CHATGPT_RESULT",
   "EXECUTE_IN_CHATGPT",
   "EXECUTE_IN_CHATGPT_V2",
   "EXECUTE_IN_CHATGPT_V3"
@@ -6744,6 +6764,10 @@ var TabRegistry = class {
   ownsTab(taskId, tabId) {
     return tabId !== void 0 && this.taskTabs.get(taskId)?.tabId === tabId;
   }
+  taskForTab(tabId) {
+    for (const [taskId, entry] of this.taskTabs) if (entry.tabId === tabId) return taskId;
+    return void 0;
+  }
   async close(taskId) {
     const mapped = this.taskTabs.get(taskId);
     this.taskTabs.delete(taskId);
@@ -6828,7 +6852,7 @@ var TaskTabGrouper = class {
       await this.tabGroups.update(groupId, {
         title: TASK_TAB_GROUP_TITLE,
         color: "blue",
-        collapsed: true
+        collapsed: false
       });
     });
   }
@@ -6842,13 +6866,14 @@ function isCurrentAdapter(value) {
 }
 async function probeAdapter(tabs, tabId, message) {
   try {
-    return isCurrentAdapter(await tabs.sendMessage(tabId, {
+    const state = await tabs.sendMessage(tabId, {
       type: "CHECK_CHATGPT_ADAPTER",
       projectId: message.projectId,
       taskId: message.taskId
-    }));
+    });
+    return isCurrentAdapter(state) ? state : void 0;
   } catch {
-    return false;
+    return void 0;
   }
 }
 async function sendWithCurrentChatGptAdapter(tabs, scripting, tabId, message) {
@@ -6874,7 +6899,11 @@ var schedulerWrites = new KeyedSerialQueue();
 var activeTabWrites = new KeyedSerialQueue();
 var queue = emptyQueue();
 var pendingScopes = /* @__PURE__ */ new Map();
-var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTabs"]).then(({ schedulerState, activeTaskTabs }) => {
+var browserTaskMessages = /* @__PURE__ */ new Map();
+var resumedBrowserUrls = /* @__PURE__ */ new Map();
+var browserRecoveryReloadedAt = /* @__PURE__ */ new Map();
+var lastBrowserLaunchAt = 0;
+var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTabs", "browserTaskMessages"]).then(async ({ schedulerState, activeTaskTabs, browserTaskMessages: storedBrowserTaskMessages }) => {
   const restored = restoreQueueSnapshot(schedulerState);
   queue = restored.queue;
   for (const [key, projectId] of restored.pendingScopes) {
@@ -6888,7 +6917,46 @@ var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTa
       }
     }
   }
+  if (Array.isArray(storedBrowserTaskMessages)) {
+    for (const entry of storedBrowserTaskMessages) if (Array.isArray(entry) && typeof entry[0] === "string") browserTaskMessages.set(entry[0], recoveryMessage(entry[1]));
+    await saveBrowserTaskMessages();
+  }
+  for (const project of await projectRepository.listProjects()) {
+    for (const task of project.graph.nodes) {
+      if (task.kind !== "task" || task.generationMode !== "browser" || !["sending", "generating"].includes(task.status)) continue;
+      const conversationUrl = concreteChatGptConversationUrl(task.conversationUrl);
+      if (!conversationUrl) continue;
+      const key = createTaskScopeKey(project.id, task.id);
+      const storedMessage = browserTaskMessages.get(key);
+      browserTaskMessages.set(key, recoveryMessage({
+          ...storedMessage,
+          type: "EXECUTE_IN_CHATGPT_V3",
+          projectId: project.id,
+          taskId: task.id,
+          prompt: appendAspectRatioPrompt(task.prompt, task.aspectRatio ?? "auto"),
+          images: [],
+          expectedConversationUrl: conversationUrl,
+          startedAt: Date.now(),
+          submittedAt: Date.now(),
+          phase: "submitted"
+        }));
+      if (!queue.running.includes(key)) queue.running.push(key);
+      pendingScopes.set(key, { projectId: project.id, taskId: task.id });
+      tabRegistry.map(key, void 0, conversationUrl);
+    }
+  }
+  await saveBrowserTaskMessages();
+  await saveScheduler();
 });
+void schedulerReady.then(() => {
+  if (browserTaskMessages.size > 0) scheduleBrowserResultRecoveryAlarm();
+});
+async function saveBrowserTaskMessages() {
+  await chrome.storage.session.set({ browserTaskMessages: [...browserTaskMessages] });
+}
+function recoveryMessage(message) {
+  return { ...message, images: [] };
+}
 async function saveScheduler() {
   await chrome.storage.session.set({
     schedulerState: createQueueSnapshot(
@@ -6962,24 +7030,40 @@ async function rememberActiveTab(key, tabId) {
   });
 }
 var API_WORKER_URL = "http://127.0.0.1:43129";
-var API_POLL_ALARM_NAME = "pixel-flow-api-poll";
-var API_POLL_DELAY_MINUTES = 0.5;
-var API_ACTIVE_STATUSES = /* @__PURE__ */ new Set(["sending", "generating", "uploading", "waiting_page"]);
-var apiPollCyclePromise;
-function scheduleApiPoll() {
-  try {
-    const result = chrome.alarms?.create?.(API_POLL_ALARM_NAME, { delayInMinutes: API_POLL_DELAY_MINUTES });
-    if (result?.catch) void result.catch(() => {
-    });
-  } catch {
-  }
+var API_RECOVERY_ALARM = "pixel-flow-api-recovery";
+var BROWSER_RESULT_RECOVERY_ALARM = "pixel-flow-browser-result-recovery";
+function scheduleApiRecoveryAlarm() {
+  chrome.alarms.create(API_RECOVERY_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
 }
-function clearApiPollAlarm() {
-  try {
-    const result = chrome.alarms?.clear?.(API_POLL_ALARM_NAME);
-    if (result?.catch) void result.catch(() => {
-    });
-  } catch {
+function scheduleBrowserResultRecoveryAlarm() {
+  chrome.alarms.create(BROWSER_RESULT_RECOVERY_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
+}
+async function reconcileBrowserTaskResults() {
+  await schedulerReady;
+  if (browserTaskMessages.size === 0) {
+    await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
+    return;
+  }
+  for (const [key, message] of browserTaskMessages) {
+    if (!queue.running.includes(key)) continue;
+    try {
+      const mapped = await tabRegistry.ensure(key, message.expectedConversationUrl);
+      let adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
+      if (!adapterState) {
+        await chrome.scripting.executeScript({ target: { tabId: mapped.tabId }, files: ["contentScript.js"] });
+        adapterState = await probeAdapter(chrome.tabs, mapped.tabId, message);
+      }
+      if (message.phase !== "submitted") continue;
+      const concreteUrl = concreteChatGptConversationUrl(mapped.conversationUrl);
+      if (!concreteUrl) continue;
+      await chrome.tabs.sendMessage(mapped.tabId, { ...message, type: "RESUME_CHATGPT_RESULT", images: [] });
+      const lastReloadedAt = browserRecoveryReloadedAt.get(key) ?? 0;
+      if (Date.now() - (message.submittedAt ?? message.startedAt ?? 0) > 12e4 && Date.now() - lastReloadedAt > 9e4) {
+        browserRecoveryReloadedAt.set(key, Date.now());
+        await chrome.tabs.reload(mapped.tabId);
+      }
+    } catch {
+    }
   }
 }
 async function apiWorkerRequest(path, options = {}) {
@@ -6993,118 +7077,13 @@ async function apiWorkerRequest(path, options = {}) {
   if (!response.ok) throw new Error(payload.error || `本机 API 任务服务返回 HTTP ${response.status}`);
   return payload;
 }
-async function getApiTaskItem(projectId, taskId, key = createTaskScopeKey(projectId, taskId)) {
-  const project = await projectRepository.loadProject(projectId);
-  const task = project?.graph.nodes.find(
-    (node) => node.id === taskId && node.kind === "task"
-  );
-  if (!project || !task || task.generationMode === "browser" || !task.apiJobId || !API_ACTIVE_STATUSES.has(task.status)) return void 0;
-  return { key, projectId, taskId, apiJobId: task.apiJobId };
-}
-async function getActiveApiTaskItems() {
-  await schedulerReady;
-  const items = /* @__PURE__ */ new Map();
-  for (const key of queue.running) {
-    const scope = pendingScopes.get(key) ?? parseTaskScopeKey(key);
-    if (!scope) continue;
-    const item = await getApiTaskItem(scope.projectId, scope.taskId, key);
-    if (item) items.set(key, item);
+async function waitForApiWorkerJob(jobId) {
+  while (true) {
+    const job = await apiWorkerRequest(`/jobs/${jobId}`);
+    if (job.status === "completed") return job.images || [];
+    if (job.status === "failed") throw new Error(job.error || "API 生图失败");
+    await new Promise((resolve) => setTimeout(resolve, 2e3));
   }
-  for (const project of await projectRepository.listProjects()) {
-    for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || task.generationMode === "browser" || !task.apiJobId || !API_ACTIVE_STATUSES.has(task.status)) continue;
-      const key = createTaskScopeKey(project.id, task.id);
-      items.set(key, { key, projectId: project.id, taskId: task.id, apiJobId: task.apiJobId });
-    }
-  }
-  return [...items.values()];
-}
-async function completeApiWorkerJob(item, images) {
-  const handled = await updateScheduler(async () => {
-    const current = await getApiTaskItem(item.projectId, item.taskId, item.key);
-    if (!current || current.apiJobId !== item.apiJobId) return false;
-    if (queue.running.includes(item.key)) {
-      queue = complete(queue, item.key);
-    } else {
-      queue = cancelTask(queue, item.key);
-    }
-    pendingScopes.delete(item.key);
-    await removeActiveScope(item.key);
-    await persistAndBroadcast({ type: "TASK_RESULT", projectId: item.projectId, taskId: item.taskId, images, responseText: "" });
-    return true;
-  });
-  if (!handled) return false;
-  void apiWorkerRequest(`/jobs/${item.apiJobId}`, { method: "DELETE" }).catch(() => {
-  });
-  await chrome.notifications.create(createTaskNotificationId(item.projectId, item.taskId), {
-    type: "basic",
-    iconUrl: chrome.runtime.getURL("icon.svg"),
-    title: "API 生图完成",
-    message: `已生成 ${images.length} 张图片`
-  });
-  return true;
-}
-async function failApiWorkerJob(item, detail) {
-  const handled = await updateScheduler(async () => {
-    const current = await getApiTaskItem(item.projectId, item.taskId, item.key);
-    if (!current || current.apiJobId !== item.apiJobId) return false;
-    if (queue.running.includes(item.key)) {
-      queue = fail(queue, item.key, "api_error");
-    } else {
-      queue = cancelTask(queue, item.key);
-    }
-    pendingScopes.delete(item.key);
-    await removeActiveScope(item.key);
-    await persistAndBroadcast({
-      type: "TASK_ERROR",
-      projectId: item.projectId,
-      taskId: item.taskId,
-      reason: "api_error",
-      detail
-    });
-    return true;
-  });
-  return handled;
-}
-async function pollApiWorkerJob(item) {
-  try {
-    const job = await apiWorkerRequest(`/jobs/${item.apiJobId}`);
-    if (job.status === "completed") {
-      await completeApiWorkerJob(item, job.images || []);
-      return false;
-    }
-    if (job.status === "failed") {
-      await failApiWorkerJob(item, job.error || "API 生图失败");
-      return false;
-    }
-    return true;
-  } catch (error) {
-    await failApiWorkerJob(item, error instanceof Error ? error.message : "API 生图失败");
-    return false;
-  }
-}
-async function processApiPollCycle() {
-  if (apiPollCyclePromise) return apiPollCyclePromise;
-  apiPollCyclePromise = (async () => {
-    const items = await getActiveApiTaskItems();
-    let hasRunningJob = false;
-    for (const item of items) {
-      if (await pollApiWorkerJob(item)) hasRunningJob = true;
-    }
-    if (hasRunningJob || (await getActiveApiTaskItems()).length > 0) {
-      scheduleApiPoll();
-    } else {
-      clearApiPollAlarm();
-    }
-  })().finally(() => {
-    apiPollCyclePromise = void 0;
-  });
-  return apiPollCyclePromise;
-}
-if (chrome.alarms?.onAlarm) {
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === API_POLL_ALARM_NAME) void processApiPollCycle();
-  });
 }
 async function executeApiTask(projectId, taskId, project, task) {
   const key = createTaskScopeKey(projectId, taskId);
@@ -7146,8 +7125,24 @@ async function executeApiTask(projectId, taskId, project, task) {
       jobId = submitted.id;
     }
     await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating", detail: void 0, apiJobId: jobId });
-    scheduleApiPoll();
-    void processApiPollCycle();
+    scheduleApiRecoveryAlarm();
+    const images = await waitForApiWorkerJob(jobId);
+    const handled = await updateScheduler(async () => {
+      if (!queue.running.includes(key)) return false;
+      await persistAndBroadcast({ type: "TASK_RESULT", projectId, taskId, images, responseText: "" });
+      queue = complete(queue, key);
+      pendingScopes.delete(key);
+      await removeActiveScope(key);
+      return true;
+    });
+    if (!handled) return;
+    void apiWorkerRequest(`/jobs/${jobId}`, { method: "DELETE" }).catch(() => {});
+    await chrome.notifications.create(createTaskNotificationId(projectId, taskId), {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icon.svg"),
+      title: "API 生图完成",
+      message: `已生成 ${images.length} 张图片`
+    });
   } catch (error) {
     const handled = await updateScheduler(async () => {
       if (!queue.running.includes(key)) return false;
@@ -7174,7 +7169,7 @@ async function executeTask(projectId, taskId) {
       (node) => node.id === taskId && node.kind === "task"
     );
     if (!project || !task) throw new Error("\u627E\u4E0D\u5230\u672C\u5730\u4EFB\u52A1");
-    if (task.generationMode !== "browser") {
+    if (task.generationMode === "api") {
       await executeApiTask(projectId, taskId, project, task);
       return;
     }
@@ -7208,10 +7203,14 @@ async function executeTask(projectId, taskId) {
       taskId,
       expectedConversationUrl: task.conversationUrl,
       prompt: appendAspectRatioPrompt([...text, task.prompt].filter(Boolean).join("\n\n"), task.aspectRatio ?? "auto"),
-      images
+      images,
+      startedAt: Date.now(),
+      phase: "preparing_tab"
     };
+    browserTaskMessages.set(key, recoveryMessage(message));
+    await saveBrowserTaskMessages();
+    scheduleBrowserResultRecoveryAlarm();
     await sendWithCurrentChatGptAdapter(chrome.tabs, chrome.scripting, mapped.tabId, message);
-    await persistAndBroadcast({ type: "TASK_STATUS", projectId, taskId, status: "generating" });
   } catch (error) {
     const reason = error instanceof ConversationUnavailableError ? "conversation_unavailable" : "selector_missing";
     const handled = await updateScheduler(async () => {
@@ -7241,15 +7240,53 @@ async function startWaitingTasks() {
     if (active.has(key)) continue;
     const scope = pendingScopes.get(key);
     if (!scope) continue;
+    if (await taskGenerationMode(key) === "browser") {
+      const waitMs = Math.max(0, BROWSER_LAUNCH_GAP_MS - (Date.now() - lastBrowserLaunchAt));
+      if (waitMs) await new Promise((resolve) => setTimeout(resolve, waitMs));
+      lastBrowserLaunchAt = Date.now();
+    }
     active.set(key, scope.projectId);
     void executeTask(scope.projectId, scope.taskId);
   }
   await chrome.storage.session.set({ activeTaskScopes: [...active] });
 }
+async function taskGenerationMode(key) {
+  const scope = pendingScopes.get(key) ?? parseTaskScopeKey(key);
+  if (!scope) return "browser";
+  const project = await projectRepository.loadProject(scope.projectId);
+  const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
+  return task?.generationMode === "api" ? "api" : "browser";
+}
+async function advanceQueueByMode() {
+  let slots = Math.max(0, MAX_CONCURRENCY - queue.running.length);
+  if (!slots || !queue.waiting.length) return;
+  let browserRunning = 0;
+  for (const key of queue.running) {
+    if (await taskGenerationMode(key) === "browser") browserRunning += 1;
+  }
+  const promoted = [];
+  const waiting = [];
+  for (const key of queue.waiting) {
+    if (!slots) {
+      waiting.push(key);
+      continue;
+    }
+    const mode = await taskGenerationMode(key);
+    if (mode === "browser" && browserRunning >= MAX_BROWSER_CONCURRENCY) {
+      waiting.push(key);
+      continue;
+    }
+    promoted.push(key);
+    slots -= 1;
+    if (mode === "browser") browserRunning += 1;
+  }
+  queue = { ...queue, running: [...queue.running, ...promoted], waiting };
+}
 async function updateScheduler(work) {
   return schedulerWrites.run("scheduler", async () => {
     await schedulerReady;
     const result = await work();
+    await advanceQueueByMode();
     await saveScheduler();
     await startWaitingTasks();
     return result;
@@ -7263,12 +7300,12 @@ async function recoverInterruptedApiTasks() {
     if (!scope) continue;
     const project = await projectRepository.loadProject(scope.projectId);
     const task = project?.graph.nodes.find((node) => node.id === scope.taskId && node.kind === "task");
-    if (task?.generationMode !== "browser") interruptedByKey.set(key, { key, ...scope });
+    if (task?.generationMode === "api") interruptedByKey.set(key, { key, ...scope });
   }
   const activeStatuses = new Set(["sending", "generating", "uploading", "waiting_page"]);
   for (const project of await projectRepository.listProjects()) {
     for (const task of project.graph.nodes) {
-      if (task.kind !== "task" || task.generationMode === "browser" || !activeStatuses.has(task.status)) continue;
+      if (task.kind !== "task" || task.generationMode !== "api" || !activeStatuses.has(task.status)) continue;
       const key = createTaskScopeKey(project.id, task.id);
       interruptedByKey.set(key, { key, projectId: project.id, taskId: task.id });
     }
@@ -7288,7 +7325,7 @@ async function recoverInterruptedApiTasks() {
           projectId: item.projectId,
           taskId: item.taskId,
           status: "generating",
-          detail: void 0,
+          detail: "已重连本机 API 任务，正在继续等待结果",
           apiJobId: task.apiJobId
         });
         continue;
@@ -7305,6 +7342,61 @@ async function recoverInterruptedApiTasks() {
     }
   });
 }
+async function reconcileCompletedApiTasks() {
+  await schedulerReady;
+  let activeApiJobs = 0;
+  for (const project of await projectRepository.listProjects()) {
+    for (const task of project.graph.nodes) {
+      if (task.kind !== "task" || task.generationMode !== "api" || !task.apiJobId) continue;
+      activeApiJobs += 1;
+      let job;
+      try {
+        job = await apiWorkerRequest(`/jobs/${task.apiJobId}`);
+      } catch {
+        continue;
+      }
+      if (job.status !== "completed" && job.status !== "failed") continue;
+      const key = createTaskScopeKey(project.id, task.id);
+      const handled = await updateScheduler(async () => {
+        if (!queue.running.includes(key)) return false;
+        if (job.status === "completed") {
+          await persistAndBroadcast({
+            type: "TASK_RESULT",
+            projectId: project.id,
+            taskId: task.id,
+            images: job.images || [],
+            responseText: ""
+          });
+          queue = complete(queue, key);
+        } else {
+          await persistAndBroadcast({
+            type: "TASK_ERROR",
+            projectId: project.id,
+            taskId: task.id,
+            reason: "api_error",
+            detail: job.error || "API 生图失败"
+          });
+          queue = fail(queue, key, "api_error");
+        }
+        pendingScopes.delete(key);
+        await removeActiveScope(key);
+        return true;
+      });
+      if (!handled) continue;
+      activeApiJobs -= 1;
+      void apiWorkerRequest(`/jobs/${task.apiJobId}`, { method: "DELETE" }).catch(() => {});
+      if (job.status === "completed") {
+        await chrome.notifications.create(createTaskNotificationId(project.id, task.id), {
+          type: "basic",
+          iconUrl: chrome.runtime.getURL("icon.svg"),
+          title: "API 生图完成",
+          message: `已生成 ${(job.images || []).length} 张图片`
+        });
+      }
+    }
+  }
+  if (activeApiJobs === 0) await chrome.alarms.clear(API_RECOVERY_ALARM);
+}
 async function handlePageTaskMessage(message, senderTab) {
   await schedulerReady;
   const key = createTaskScopeKey(message.projectId, message.taskId);
@@ -7315,6 +7407,25 @@ async function handlePageTaskMessage(message, senderTab) {
   }
   const handled = await updateScheduler(async () => {
     if (!queue.running.includes(key)) return false;
+    const recoveryMessageState = browserTaskMessages.get(key);
+    if (message.type === "TASK_ERROR" && recoveryMessageState?.phase === "submitted" && !message.recovery) {
+      return true;
+    }
+    if (message.type === "TASK_STATUS") {
+      const pendingMessage = browserTaskMessages.get(key);
+      if (pendingMessage?.phase === "submitted" && ["preparing_tab", "uploading", "sending"].includes(message.status)) {
+        return true;
+      }
+      if (pendingMessage) {
+        const phase = message.status === "generating" ? "submitted" : message.status;
+        browserTaskMessages.set(key, {
+          ...pendingMessage,
+          phase,
+          submittedAt: phase === "submitted" ? pendingMessage.submittedAt ?? Date.now() : pendingMessage.submittedAt
+        });
+        await saveBrowserTaskMessages();
+      }
+    }
     await persistAndBroadcast({ ...message, conversationUrl });
     if (message.type === "TASK_RESULT") {
       queue = complete(queue, key);
@@ -7325,6 +7436,11 @@ async function handlePageTaskMessage(message, senderTab) {
     }
     if (message.type === "TASK_RESULT" || message.type === "TASK_ERROR") {
       pendingScopes.delete(key);
+      browserTaskMessages.delete(key);
+      resumedBrowserUrls.delete(key);
+      browserRecoveryReloadedAt.delete(key);
+      await saveBrowserTaskMessages();
+      if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
       await removeActiveScope(key);
     }
     return true;
@@ -7341,6 +7457,32 @@ async function handlePageTaskMessage(message, senderTab) {
   }
   return true;
 }
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  void (async () => {
+    await schedulerReady;
+    const observedUrl = changeInfo.url ?? tab.url;
+    if (!observedUrl?.startsWith("https://chatgpt.com/") || changeInfo.status !== "complete" && !changeInfo.url) return;
+    const key = tabRegistry.taskForTab(tabId);
+    const message = key ? browserTaskMessages.get(key) : void 0;
+    if (!key || !message || resumedBrowserUrls.get(key) === observedUrl) return;
+    if (observedUrl.includes("?prompt=")) {
+      if (changeInfo.status !== "complete") return;
+      resumedBrowserUrls.set(key, observedUrl);
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () => document.querySelector('[data-testid="send-button"], #composer-submit-button, button[aria-label*="Send" i], button[aria-label*="发送"]')?.click()
+      });
+      return;
+    }
+    if (!/^https:\/\/chatgpt\.com\/c\/[^/]+\/?$/.test(observedUrl) || message.phase !== "submitted") return;
+    resumedBrowserUrls.set(key, observedUrl);
+    if (!await probeAdapter(chrome.tabs, tabId, message)) {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["contentScript.js"] });
+    }
+    await chrome.tabs.sendMessage(tabId, { ...message, type: "RESUME_CHATGPT_RESULT", images: [] });
+  })().catch(() => {});
+});
 chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   if (!isExtensionMessage(raw)) return false;
   const message = raw;
@@ -7364,6 +7506,11 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
       const key = createTaskScopeKey(message.projectId, message.taskId);
       queue = cancelTask(queue, key);
       pendingScopes.delete(key);
+      browserTaskMessages.delete(key);
+      resumedBrowserUrls.delete(key);
+      browserRecoveryReloadedAt.delete(key);
+      await saveBrowserTaskMessages();
+      if (browserTaskMessages.size === 0) await chrome.alarms.clear(BROWSER_RESULT_RECOVERY_ALARM);
       await removeActiveScope(key);
       await tabRegistry.close(key);
     }).then(() => sendResponse({ accepted: true }), (error) => sendResponse({ accepted: false, error: String(error) }));
@@ -7421,7 +7568,11 @@ chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   }
   return false;
 });
-void recoverInterruptedApiTasks().then(() => updateScheduler(async () => void 0)).then(() => processApiPollCycle());
+void recoverInterruptedApiTasks().then(() => updateScheduler(async () => void 0));
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === API_RECOVERY_ALARM) void reconcileCompletedApiTasks();
+  if (alarm.name === BROWSER_RESULT_RECOVERY_ALARM) void reconcileBrowserTaskResults();
+});
 chrome.notifications.onClicked.addListener((notificationId) => {
   const url = notificationIdToCanvasUrl(notificationId, chrome.runtime.getURL("index.html"));
   void chrome.tabs.create({ url });

@@ -1,7 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Pixel Flow">
-  <rect width="128" height="128" rx="30" fill="#FCFDFF"/>
-  <rect x="1.5" y="1.5" width="125" height="125" rx="28.5" fill="none" stroke="#E1E4E9" stroke-width="3"/>
-  <path d="M29 34h32c17 0 29 12 29 28S78 90 61 90H47v20H29V34zm18 17v22h13c7 0 12-4 12-11S67 51 60 51H47z" fill="#17191D"/>
-  <circle cx="98" cy="54" r="9" fill="#6F3CFF"/>
-  <circle cx="98" cy="86" r="9" fill="#6F3CFF"/>
+  <rect width="128" height="128" rx="30" fill="#17191D"/>
+  <text x="64" y="73" text-anchor="middle" dominant-baseline="middle" fill="#FFFFFF" font-family="Arial Rounded MT Bold, Arial, sans-serif" font-size="38" font-weight="800" letter-spacing="-2">PF</text>
 </svg>

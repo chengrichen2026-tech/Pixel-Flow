@@ -11,6 +11,13 @@ test("browser runs wait for an in-flight mode save", async () => {
   assert.match(source, /await pendingModeSave/);
 });
 
+test("running ChatGPT task groups stay expanded so background tabs are not frozen", async () => {
+  const source = await readFile(new URL("public/background.js", root), "utf8");
+  assert.match(source, /title: TASK_TAB_GROUP_TITLE,[\s\S]*?collapsed: false/);
+  assert.doesNotMatch(source, /title: TASK_TAB_GROUP_TITLE,[\s\S]*?collapsed: true/);
+  assert.match(source, /if \(message\.type === "TASK_RESULT"\) \{\s*await tabRegistry\.hibernate\(key\)/);
+});
+
 test("a new run clears stale status detail before queueing", async () => {
   const source = await readFile(new URL("public/background.js", root), "utf8");
   assert.match(source, /status: "queued",\s*detail: void 0/);
@@ -43,7 +50,16 @@ test("manual send keeps the task alive until the user submits and the result ret
   assert.match(content, /await input\.onManualAction\?\.\(\)/);
   assert.match(content, /10 \* 6e4/);
   assert.match(background, /else if \(message\.type === "TASK_ERROR"\)/);
-  assert.match(modeUi, /task-status\[data-status="manual_action"\]/);
+  assert.doesNotMatch(modeUi, /task-status\[data-status="manual_action"\]/);
+});
+
+test("ChatGPT send confirmation never falls back to native form submission", async () => {
+  const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.doesNotMatch(source, /requestSubmit\(/);
+  assert.match(source, /const retrySendButton = findSendButton\(\)/);
+  assert.match(source, /if \(retrySendButton && !retrySendButton\.disabled\) retrySendButton\.click\(\)/);
+  assert.match(source, /15e3,[\s\S]*?synthetic click was not accepted/);
+  assert.match(source, /15e3,[\s\S]*?second ChatGPT send click was not accepted/);
 });
 
 test("a new ChatGPT conversation URL gets a hydration grace period before rejection", async () => {
@@ -51,6 +67,42 @@ test("a new ChatGPT conversation URL gets a hydration grace period before reject
   assert.match(source, /let pendingConversationStartedAt = 0/);
   assert.match(source, /Date\.now\(\) - pendingConversationStartedAt <= 15e3/);
   assert.match(source, /if \(!submittedTurnIsStillVisible\(previousUserTurnCount, prompt\)\)/);
+});
+
+test("conversation continuity ignores Markdown markers removed by ChatGPT rendering", async () => {
+  const source = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(source, /function normalizeComparableTurnText\(text\)/);
+  assert.match(source, /function normalizeSemanticTurnText\(text\)/);
+  assert.match(source, /replace\(\/\[\^\\p\{L\}\\p\{N\}\]\+\/gu, ""\)/);
+  assert.match(source, /const submittedText = normalizeSemanticTurnText\(prompt\)/);
+  assert.match(source, /const latestText = normalizeSemanticTurnText\(turns\.at\(-1\)/);
+  assert.match(source, /```\[a-z0-9_-\]\*\|```/);
+  assert.match(source, /`\(\[\^`\]\*\)`/);
+  assert.match(source, /submittedText\.slice\(0, 80\)/);
+  assert.match(source, /submittedText\.slice\(-80\)/);
+  assert.match(source, /lockedConversationUrl = `\$\{current\.origin\}\$\{current\.pathname\}`/);
+});
+
+test("long image prompts resume across ChatGPT full-page navigation", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const background = await readFile(new URL("public/background.js", root), "utf8");
+  assert.match(content, /"RESUME_CHATGPT_RESULT"/);
+  assert.match(content, /async function resumeTask\(input\)/);
+  assert.match(content, /ChatGPT 对话已打开，但没有找到已发送的任务消息/);
+  assert.match(background, /var browserTaskMessages/);
+  assert.match(background, /"browserTaskMessages"/);
+  assert.match(background, /async function saveBrowserTaskMessages\(\)/);
+  assert.match(background, /function recoveryMessage\(message\)/);
+  assert.match(background, /return \{ \.\.\.message, images: \[\] \}/);
+  assert.match(background, /browserTaskMessages\.set\(key, recoveryMessage\(message\)\)/);
+  assert.match(background, /await saveBrowserTaskMessages\(\)/);
+  assert.match(background, /await schedulerReady/);
+  assert.match(background, /chrome\.tabs\.onUpdated\.addListener/);
+  assert.match(background, /const observedUrl = changeInfo\.url \?\? tab\.url/);
+  assert.match(background, /changeInfo\.status !== "complete" && !changeInfo\.url/);
+  assert.match(background, /observedUrl\.includes\("\?prompt="\)/);
+  assert.match(background, /world: "MAIN"/);
+  assert.match(background, /type: "RESUME_CHATGPT_RESULT"/);
 });
 
 test("API mode submits persistent jobs and reconnects with apiJobId", async () => {
@@ -62,34 +114,16 @@ test("API mode submits persistent jobs and reconnects with apiJobId", async () =
   assert.match(manifest, /http:\/\/127\.0\.0\.1:43129\/\*/);
 });
 
-test("API mode is the default unless a task explicitly chooses browser mode", async () => {
-  const modeUi = await readFile(new URL("production/generation-mode.js", root), "utf8");
-  const background = await readFile(new URL("public/background.js", root), "utf8");
-  assert.match(modeUi, /generationMode === "browser" \? "browser" : "api"/);
-  assert.match(modeUi, /saveTaskMode\(currentProjectId, currentTaskId, "api"\)/);
-  assert.match(background, /if \(task\.generationMode !== "browser"\)/);
-  assert.doesNotMatch(background, /if \(task\.generationMode === "api"\)/);
-});
-
-test("API mode wakes the MV3 service worker to poll persistent jobs", async () => {
+test("normal API generation does not show a status detail as an alert", async () => {
   const source = await readFile(new URL("public/background.js", root), "utf8");
-  const manifest = await readFile(new URL("public/manifest.json", root), "utf8");
-  assert.match(manifest, /"alarms"/);
-  assert.match(source, /API_POLL_ALARM_NAME = "pixel-flow-api-poll"/);
-  assert.match(source, /chrome\.alarms\.onAlarm\.addListener/);
-  assert.match(source, /void processApiPollCycle\(\)/);
-  assert.match(source, /then\(\(\) => processApiPollCycle\(\)\)/);
-  assert.doesNotMatch(source, /function waitForApiWorkerJob/);
-  assert.doesNotMatch(source, /const images = await waitForApiWorkerJob\(jobId\)/);
-});
-
-test("API mode does not show normal progress as red status detail", async () => {
-  const source = await readFile(new URL("public/background.js", root), "utf8");
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
+  const store = await readFile(new URL("src/store.ts", root), "utf8");
   assert.match(source, /status: "sending", detail: void 0/);
   assert.match(source, /status: "generating", detail: void 0, apiJobId: jobId/);
-  assert.doesNotMatch(source, /API 任务已由本机服务持久执行/);
-  assert.doesNotMatch(source, /正在向本机 API 任务服务提交请求/);
-  assert.doesNotMatch(source, /已重连本机 API 任务/);
+  assert.doesNotMatch(source, /正在重连本机 API 任务|正在向本机 API 任务服务提交请求/);
+  assert.doesNotMatch(source, /API 任务已由本机服务持久执行，扩展重载后可恢复/);
+  assert.match(app, /\['failed','manual_action'\]\.includes\(n\.status\)/);
+  assert.match(store, /status:"queued",statusDetail:undefined/);
 });
 
 test("switching to browser mode clears inherited API job state", async () => {
@@ -106,17 +140,55 @@ test("browser results preserve the original latest-assistant-turn writeback path
   assert.doesNotMatch(source, /existingImageSources/);
   assert.doesNotMatch(source, /collectGeneratedImageSources/);
   assert.match(source, /isTransientResponseText\(responseText\) \? "" : responseText/);
+  assert.match(source, /\(\?:\\d\+\\s\*\(\?:s\|m\|h/);
 });
 
 test("reinjected ChatGPT adapter replaces a stale page listener after extension reload", async () => {
   const content = await readFile(new URL("public/contentScript.js", root), "utf8");
   const background = await readFile(new URL("public/background.js", root), "utf8");
-  assert.match(content, /CHATGPT_ADAPTER_VERSION = 15/);
-  assert.match(background, /CHATGPT_ADAPTER_VERSION = 15/);
+  assert.match(content, /CHATGPT_ADAPTER_VERSION = 25/);
+  assert.match(background, /CHATGPT_ADAPTER_VERSION = 25/);
   assert.match(content, /__gptNodeCanvasMessageListener/);
   assert.match(content, /removeListener\(previousMessageListener\)/);
   assert.match(content, /addListener\(currentMessageListener\)/);
   assert.doesNotMatch(content, /if \(contentScriptScope\.__gptNodeCanvasAdapterVersion !== CHATGPT_ADAPTER_VERSION\)/);
+});
+
+test("browser results are recovered by a service-worker alarm without opening the conversation", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  const background = await readFile(new URL("public/background.js", root), "utf8");
+  assert.match(background, /BROWSER_RESULT_RECOVERY_ALARM = "pixel-flow-browser-result-recovery"/);
+  assert.match(background, /scheduleBrowserResultRecoveryAlarm\(\)/);
+  assert.match(background, /if \(browserTaskMessages\.size > 0\) scheduleBrowserResultRecoveryAlarm\(\)/);
+  assert.match(background, /async function reconcileBrowserTaskResults\(\)/);
+  assert.match(background, /type: "RESUME_CHATGPT_RESULT"/);
+  assert.match(background, /alarm\.name === BROWSER_RESULT_RECOVERY_ALARM/);
+  assert.match(background, /if \(message\.phase !== "submitted"\) continue/);
+  assert.match(background, /const concreteUrl = concreteChatGptConversationUrl\(mapped\.conversationUrl\)/);
+  assert.match(background, /Date\.now\(\) - \(message\.submittedAt \?\? message\.startedAt \?\? 0\) > 12e4/);
+  assert.match(background, /await chrome\.tabs\.reload\(mapped\.tabId\)/);
+  assert.match(content, /__gptNodeCanvasActiveResumeTasks/);
+  assert.match(content, /__gptNodeCanvasActiveSubmitTasks/);
+  assert.doesNotMatch(content, /activeSubmitTasks\.has\(resumeKey\)/);
+  assert.match(content, /taskPhases\.set\(taskKey, "preparing_tab"\)/);
+  assert.match(content, /await input\.onPhase\?\.\("submitted"\)/);
+  assert.match(content, /signalBackgroundPageActivity\(\)/);
+  assert.match(content, /activeResumeTasks\.has\(resumeKey\)/);
+  assert.match(content, /type: "TASK_ERROR",\s*recovery: true/);
+  assert.match(background, /message\.type === "TASK_ERROR" && recoveryMessageState\?\.phase === "submitted" && !message\.recovery/);
+});
+
+test("extension reload reconstructs recovery state for persisted generating browser tasks", async () => {
+  const background = await readFile(new URL("public/background.js", root), "utf8");
+  assert.match(background, /for \(const project of await projectRepository\.listProjects\(\)\)/);
+  assert.match(background, /task\.generationMode !== "browser" \|\| !\["sending", "generating"\]\.includes\(task\.status\)/);
+  assert.match(background, /const conversationUrl = concreteChatGptConversationUrl\(task\.conversationUrl\)/);
+  assert.match(background, /const storedMessage = browserTaskMessages\.get\(key\)/);
+  assert.match(background, /\.\.\.storedMessage/);
+  assert.match(background, /phase: "submitted"/);
+  assert.match(background, /if \(!queue\.running\.includes\(key\)\) queue\.running\.push\(key\)/);
+  assert.match(background, /tabRegistry\.map\(key, void 0, conversationUrl\)/);
+  assert.match(background, /pendingMessage\?\.phase === "submitted" && \["preparing_tab", "uploading", "sending"\]\.includes\(message\.status\)/);
 });
 
 test("hidden ChatGPT tabs receive page activity signals while reference images upload", async () => {
@@ -128,19 +200,64 @@ test("hidden ChatGPT tabs receive page activity signals while reference images u
   assert.match(content, /signalBackgroundPageActivity\(\)/);
 });
 
+test("multiple ChatGPT reference images upload sequentially and recognize current file tiles", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(content, /\[data-composer-grid\] \[role="group"\]\[aria-label\]/);
+  assert.match(content, /for \(const \[index, image\] of images\.entries\(\)\)/);
+  assert.match(content, /expectedAttachmentCount \+= 1/);
+  assert.match(content, /countComposerAttachments\(\) < expectedAttachmentCount/);
+  assert.match(content, /await waitForStableComposerAttachments\(expectedAttachmentCount, index \+ 1\)/);
+  assert.match(content, /\\u7B2C \$\{index \+ 1\} \\u5F20\\u53C2\\u8003\\u56FE/);
+});
+
+test("ChatGPT waits for every reference image to finish a stable upload before sending", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(content, /function composerAttachmentSignature\(\)/);
+  assert.match(content, /button\[aria-label\^="\\u6253\\u5F00\\u56FE\\u7247\\uFF1A"\]/);
+  assert.match(content, /async function waitForStableComposerAttachments\(expectedCount, imageNumber\)/);
+  assert.match(content, /attachmentCount === expectedCount && !composerIsUploading\(\)/);
+  assert.match(content, /Date\.now\(\) - stableSince >= 3e3/);
+  assert.doesNotMatch(content, /naturalWidth > 0/);
+  assert.match(content, /if \(removeButtons\.length > 0\) return removeButtons\.length/);
+  assert.match(content, /return removeButtons\.map\(\(button\) => button\.getAttribute\("aria-label"\)/);
+  assert.match(content, /findUploadInput\(\) \?\? resolvedInput/);
+  assert.match(content, /任务开始前已有附件/);
+});
+
+test("ChatGPT upload selects the file input belonging to the active composer", async () => {
+  const content = await readFile(new URL("public/contentScript.js", root), "utf8");
+  assert.match(content, /const region = findComposerRegion\(\);[\s\S]*?region\.querySelector\(selector\)/);
+  assert.match(content, /document\.querySelectorAll\(selector\)/);
+  assert.match(content, /candidates\.at\(-1\)/);
+});
+
+test("browser tasks keep reference upload and prompt submission in one adapter transaction", async () => {
+  const background = await readFile(new URL("public/background.js", root), "utf8");
+  const executeTask = background.slice(background.indexOf("async function executeTask"), background.indexOf("async function startWaitingTasks"));
+  assert.match(executeTask, /prompt: appendAspectRatioPrompt[\s\S]*?images,[\s\S]*?startedAt: Date\.now\(\),[\s\S]*?phase: "preparing_tab"\s*\n\s*};/);
+  assert.doesNotMatch(executeTask, /world: "MAIN"/);
+  assert.doesNotMatch(executeTask, /images: \[\]/);
+});
+
 test("images can be dropped onto the canvas at the pointer position", async () => {
-  const build = await readFile(new URL("scripts/build-extension.mjs", root), "utf8");
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
   const manifest = await readFile(new URL("public/manifest.json", root), "utf8");
-  assert.match(build, /onDrop:async H=>/);
-  assert.match(build, /f\.pasteImage\(O,m\(\{x:H\.clientX,y:H\.clientY\}\)\)/);
-  assert.match(build, /text\/uri-list/);
+  assert.match(app, /onDrop=\{async event=>/);
+  assert.match(app, /screenToFlowPosition\(\{x:event\.clientX,y:event\.clientY\}\)/);
+  assert.match(app, /text\/uri-list/);
   assert.match(manifest, /https:\/\/\*\.oaiusercontent\.com\/\*/);
 });
 
 test("trackpad pan works over prompt text and left-drag creates a partial selection box", async () => {
-  const build = await readFile(new URL("scripts/build-extension.mjs", root), "utf8");
-  assert.match(build, /selectionOnDrag:!0,selectionMode:\"partial\",panOnDrag:\[1,2\],panOnScroll:!0/);
-  assert.match(build, /\['task-prompt nodrag nowheel', 'task-prompt nodrag'\]/);
+  const app = await readFile(new URL("src/App.tsx", root), "utf8");
+  assert.match(app, /selectionOnDrag selectionMode=\{SelectionMode\.Partial\} panOnDrag=\{\[1,2\]\} panOnScroll/);
+  assert.match(app, /className="task-prompt nodrag"/);
+});
+
+test("the canvas uses the default arrow cursor while idle", async () => {
+  const theme = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");
+  assert.match(theme, /\.flow-stage \.react-flow__pane\.selection\{cursor:default\}/);
+  assert.match(theme, /\.flow-stage \.react-flow__pane\.dragging\{cursor:grabbing\}/);
 });
 
 test("hidden ChatGPT task tabs receive internal refresh signals without foreground activation", async () => {
