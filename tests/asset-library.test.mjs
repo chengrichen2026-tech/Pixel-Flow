@@ -299,6 +299,17 @@ test("product and reference management follow the compact library layout", async
   assert.match(styles, /\.pf-media-management-toolbar\{display:flex;justify-content:flex-end/);
 });
 
+test("prompt, product, and gallery cards share the same tag placement contract", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");
+  const promptListSource = source.slice(source.indexOf("function promptList"), source.indexOf("function mediaList"));
+  const mediaListSource = source.slice(source.indexOf("function mediaList"), source.indexOf("function promptUsageList"));
+  assert.match(promptListSource, /pf-prompt-item pf-tagged-library-card[\s\S]*pf-management-card-meta[\s\S]*promptTagBadges\(item\)/);
+  assert.match(mediaListSource, /pf-media-item pf-tagged-library-card[\s\S]*pf-management-card-meta[\s\S]*promptTagBadges\(item\)/);
+  assert.match(styles, /\.pf-library-panel\.is-management \.pf-tagged-library-card>\.pf-management-card-meta\{position:static!important/);
+  assert.match(styles, /\.pf-library-panel\.is-management \.pf-tagged-library-card>\.pf-prompt-tags\{position:static!important;display:flex!important;width:auto!important;height:auto!important;min-height:22px!important;aspect-ratio:auto!important/);
+});
+
 test("deleting media removes only its card without rerendering the panel", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   assert.match(source, /function removeMediaCard\(target\)/);
