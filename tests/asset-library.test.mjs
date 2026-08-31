@@ -251,6 +251,9 @@ test("prompt creation dialog supports optional example images and reusable editi
   assert.doesNotMatch(source, /data-new-prompt-name|data-new-prompt-content|data-action="prompt-save"/);
   assert.match(styles, /\.pf-prompt-dialog-backdrop/);
   assert.match(styles, /\.pf-prompt-example-thumb/);
+  assert.match(styles, /\.pf-prompt-dialog\{[^}]*overflow:hidden;display:flex;flex-direction:column/);
+  assert.match(styles, /\.pf-prompt-dialog-form\{[^}]*flex:1 1 auto;overflow:auto/);
+  assert.match(styles, /\.pf-prompt-dialog>footer\{[^}]*flex:0 0 auto/);
 });
 
 test("prompt, product, and gallery tags are dynamic and editable", async () => {

@@ -188,13 +188,13 @@ body.pf-gallery-open .pf-library-rail button[data-action="save-memory"]{display:
 .pf-prompt-example-thumb img{width:100%;height:100%;object-fit:cover}
 .pf-usage-list .pf-prompt-example-thumb{height:auto;aspect-ratio:3/2}
 .pf-prompt-dialog-backdrop{position:fixed;inset:0;z-index:1700;display:grid;place-items:center;padding:20px;background:rgba(35,38,44,.36);backdrop-filter:blur(7px)}
-.pf-prompt-dialog{width:min(640px,100%);max-height:calc(100dvh - 40px);overflow:auto;padding:20px;color:#25282e;background:#fff;border:1px solid #dfe2e7;border-radius:18px;box-shadow:0 28px 80px rgba(31,37,46,.25)}
-.pf-prompt-dialog>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.pf-prompt-dialog{width:min(640px,100%);max-height:calc(100dvh - 40px);overflow:hidden;display:flex;flex-direction:column;color:#25282e;background:#fff;border:1px solid #dfe2e7;border-radius:18px;box-shadow:0 28px 80px rgba(31,37,46,.25)}
+.pf-prompt-dialog>header{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 20px 0}
 .pf-prompt-dialog>header>div{display:grid;gap:4px}
 .pf-prompt-dialog>header strong{font-size:18px}
 .pf-prompt-dialog>header small{color:#858b95;font-size:10px}
 .pf-prompt-dialog>header>button{width:32px;height:32px;color:#747a84;background:#f1f2f4;border:0;border-radius:9px;font-size:19px;cursor:pointer}
-.pf-prompt-dialog-form{display:grid;gap:14px;margin-top:18px}
+.pf-prompt-dialog-form{min-height:0;flex:1 1 auto;overflow:auto;display:grid;gap:14px;margin-top:18px;padding:0 20px 16px;overscroll-behavior:contain}
 .pf-prompt-dialog-form>label{display:grid;gap:6px;color:#555b65;font-size:10px;font-weight:700}
 .pf-prompt-dialog-form input,.pf-prompt-dialog-form textarea{width:100%;padding:10px 11px;color:#25282e;background:#f8f9fa;border:1px solid #dfe2e7;border-radius:10px;outline:0;font-size:11px;font-weight:400}
 .pf-prompt-dialog-form input{height:40px}
@@ -211,7 +211,7 @@ body.pf-gallery-open .pf-library-rail button[data-action="save-memory"]{display:
 .pf-prompt-example-actions button{height:32px;padding:0 10px;color:#656b75;background:#fff;border:1px solid #dfe2e7;border-radius:8px;font-size:9px;cursor:pointer}
 .pf-prompt-example-actions button:disabled{opacity:.4;cursor:default}
 .pf-prompt-dialog-error{min-height:16px;margin:0;color:#bd4038;font-size:10px}
-.pf-prompt-dialog>footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.pf-prompt-dialog>footer{position:relative;z-index:2;flex:0 0 auto;display:flex;justify-content:flex-end;gap:8px;margin:0;padding:12px 20px 20px;background:#fff;border-top:1px solid #eceef1;box-shadow:0 -8px 20px rgba(31,37,46,.04)}
 .pf-prompt-dialog>footer button{height:38px;padding:0 15px;color:#5f6570;background:#fff;border:1px solid #dfe2e7;border-radius:9px;font-size:10px;font-weight:700;cursor:pointer}
 .pf-prompt-dialog>footer button.primary{color:#fff;border-color:#6f3cff;background:#6f3cff}
 .pf-library-panel>.pf-prompt-filters{display:flex;grid-template-columns:none;flex-wrap:wrap;gap:7px;padding:4px 12px 8px}
