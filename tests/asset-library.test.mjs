@@ -160,6 +160,10 @@ test("canvas and asset library storage controls use complete portable backups", 
   assert.match(source, /exportCurrentCanvas\(target\.dataset\.projectId\)/);
   assert.match(source, /data-action="canvas-import"/);
   assert.match(source, /async function importCanvas\(file\)/);
+  assert.match(source, /new CustomEvent\("pixel-flow:project-refresh", \{ detail: \{ projectId \} \}\)/);
+  assert.match(source, /detail: \{ projectId: target\.dataset\.projectId \}/);
+  const canvasOpen = source.slice(source.indexOf('if (action === "canvas-open")'), source.indexOf('if (action === "canvas-menu")'));
+  assert.doesNotMatch(canvasOpen, /querySelector\("\.project-picker select/);
   assert.match(source, /data-action="canvas-create"/);
   assert.match(source, /data-action="canvas-rename"/);
   assert.match(source, /data-action="canvas-switch"/);

@@ -282,8 +282,7 @@
     await putProject(project);
     window.dispatchEvent(new CustomEvent("pixel-flow:projects-refresh"));
     setTimeout(() => {
-      const select = document.querySelector(".project-picker select,.project select");
-      if (select) { select.value = projectId; select.dispatchEvent(new Event("change", { bubbles: true })); }
+      window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId } }));
       void openProjectGallery();
     }, 80);
     notify(`画布“${project.name}”已导入`);
@@ -1116,8 +1115,7 @@
       return;
     }
     if (action === "canvas-open") {
-      const select = document.querySelector(".project-picker select,.project select");
-      if (select) { select.value = target.dataset.projectId; select.dispatchEvent(new Event("change", { bubbles: true })); }
+      window.dispatchEvent(new CustomEvent("pixel-flow:project-refresh", { detail: { projectId: target.dataset.projectId } }));
       closeProjectGallery();
       return;
     }
