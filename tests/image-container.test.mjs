@@ -110,7 +110,10 @@ test("selected image containers receive clicked product and gallery assets", asy
 });
 
 test("repeated product clicks keep the connected task selected after each project refresh", async () => {
-  const legacyLibrary = await source("production/asset-library.js");
+  const [legacyLibrary, store] = await Promise.all([
+    source("production/asset-library.js"),
+    source("src/store.ts"),
+  ]);
   assert.match(
     legacyLibrary,
     /selectedNodeIds: targetTaskId \? \[targetTaskId\] : \[nodeId\]/,
@@ -121,4 +124,7 @@ test("repeated product clicks keep the connected task selected after each projec
     /task\.inputEdgeOrder = \[\.\.\.\(task\.inputEdgeOrder \|\| \[\]\), edgeId\]/,
     "each repeated media insert must append its input edge to the task order",
   );
+  assert.match(store, /let projectReadQueue: Promise<void> = Promise\.resolve\(\)/);
+  assert.match(store, /async refresh\(projectId\) \{ return serializeProjectRead/);
+  assert.match(store, /async openProject\(projectId\)\{return serializeProjectRead/);
 });
