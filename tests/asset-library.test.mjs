@@ -221,7 +221,7 @@ test("libraries separate outside management from inside usage", async () => {
   assert.match(managementPromptList, /prompt-edit/);
   assert.match(managementPromptList, /prompt-delete/);
   assert.doesNotMatch(managementPromptList, /prompt-replace|prompt-append|data-drag-kind/);
-  assert.match(managementMediaList, /media-rename/);
+  assert.match(managementMediaList, /media-edit/);
   assert.match(managementMediaList, /media-delete/);
   assert.doesNotMatch(managementMediaList, /media-apply|data-drag-kind/);
   assert.match(styles, /\.pf-library-panel\.is-management/);
@@ -253,16 +253,19 @@ test("prompt creation dialog supports optional example images and reusable editi
   assert.match(styles, /\.pf-prompt-example-thumb/);
 });
 
-test("prompt cards show only names, examples, and filterable tags", async () => {
+test("prompt, product, and gallery tags are dynamic and editable", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");
-  assert.match(source, /const PROMPT_TAGS = \["模版", "构图", "背景", "功能"\]/);
+  assert.match(source, /const normalizeTags =/);
   assert.match(styles, /aspect-ratio:3\/2/);
-  assert.match(source, /function promptTagFilters\(\)/);
-  assert.match(source, /data-action="prompt-filter"/);
+  assert.match(source, /function libraryTags\(library, tab = activeTab\)/);
+  assert.match(source, /function libraryTagFilters\(library, tab = activeTab\)/);
+  assert.match(source, /data-action="library-tag-filter"/);
   assert.match(source, /function promptTagBadges\(item\)/);
-  assert.match(source, /data-prompt-tag/);
-  assert.match(source, /请至少选择一个提示词标签/);
+  assert.match(source, /function tagEditorMarkup\(tags = \[\]\)/);
+  assert.match(source, /function bindTagEditor\(root\)/);
+  assert.match(source, /event\.key === "Enter" \|\| event\.key === ","/);
+  assert.match(source, /function openMediaDialog\(media\)/);
   const managementPromptList = source.slice(source.indexOf("function promptList"), source.indexOf("function mediaList"));
   const usagePromptList = source.slice(source.indexOf("function promptUsageList"), source.indexOf("function mediaUsageList"));
   assert.doesNotMatch(managementPromptList, /escapeHtml\(item\.content\)/);
@@ -271,7 +274,7 @@ test("prompt cards show only names, examples, and filterable tags", async () => 
   assert.doesNotMatch(usagePromptList, /prompt-replace|prompt-append|data-drag-kind/);
   assert.match(styles, /\.pf-prompt-filters/);
   assert.match(styles, /\.pf-prompt-tags/);
-  assert.match(styles, /\.pf-prompt-tag-picker/);
+  assert.match(styles, /\.pf-tag-editor/);
 });
 
 test("prompt management uses the compact toolbar layout", async () => {
@@ -388,7 +391,7 @@ test("primary libraries keep names visible while the gallery uses hover controls
   const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");
   assert.match(source, /const libraryCardIcon = \(name\)/);
   const managementCards = source.slice(source.indexOf("function promptList"), source.indexOf("function promptUsageList")) + source.slice(source.indexOf("function templateList"), source.indexOf("function templateEditor"));
-  for (const action of ["prompt-edit", "prompt-delete", "media-rename", "media-delete", "template-edit", "template-delete"]) assert.match(managementCards, new RegExp(`data-action="${action}"[^>]*aria-label=`));
+  for (const action of ["prompt-edit", "prompt-delete", "media-edit", "media-delete", "template-edit", "template-delete"]) assert.match(managementCards, new RegExp(`data-action="${action}"[^>]*aria-label=`));
   assert.match(managementCards, /pf-management-card-meta/);
   assert.match(styles, /\.pf-library-panel\.is-management \.pf-prompt-item \.pf-management-card-meta,.pf-library-panel\.is-management \.pf-media-grid--product \.pf-management-card-meta,.pf-library-panel\.is-management \.pf-template-item \.pf-management-card-meta\{position:static/);
   assert.match(styles, /\.pf-library-panel\.is-management \.pf-management-card-meta\{position:absolute/);
