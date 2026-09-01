@@ -292,6 +292,15 @@ test("product and gallery sidebars keep tag filters without per-image tag badges
   assert.match(nativeSource, /className="native-library-filters"/);
 });
 
+test("every library sidebar opening resets search and tag filters to all", async () => {
+  const source = await readFile(new URL("production/asset-library.js", root), "utf8");
+  const nativeSource = await readFile(new URL("src/AssetLibrary.tsx", root), "utf8");
+  const openPanel = source.slice(source.indexOf("function openPanel"), source.indexOf("function openLibraryManagement"));
+  assert.match(openPanel, /activeLibraryTag = ""/);
+  assert.match(openPanel, /searchQuery = ""/);
+  assert.match(nativeSource, /useEffect\(\(\)=>\{setTag\(""\);setQuery\(""\)\},\[tab\]\)/);
+});
+
 test("prompt management uses the compact toolbar layout", async () => {
   const source = await readFile(new URL("production/asset-library.js", root), "utf8");
   const styles = await readFile(new URL("production/pixel-flow-theme.css", root), "utf8");

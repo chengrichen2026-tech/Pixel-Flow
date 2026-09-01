@@ -1035,6 +1035,8 @@
     closeProjectGallery();
     panelMode = templateId ? "template-editor" : "usage";
     activeTab = tab;
+    activeLibraryTag = "";
+    searchQuery = "";
     if (templateId) editingTemplateId = templateId;
     editingTemplateNodeId = templateNodeId || "";
     if (!panel) {
