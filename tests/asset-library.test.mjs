@@ -354,6 +354,10 @@ test("product management uses bounded 3:2 previews while reference management ke
   assert.match(source, /const observedMasonryItems = new WeakMap\(\)/);
   assert.match(source, /observedMasonryItems\.set\(item, observer\)/);
   assert.match(source, /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => layoutMediaMasonry\(masonryRoot\)\)\)/);
+  assert.match(source, /const scrollContainer = grid\.closest\("\.pf-library-content"\)/);
+  assert.match(source, /const preservedScrollTop = scrollContainer\?\.scrollTop/);
+  assert.match(source, /scrollContainer\.scrollTop = preservedScrollTop/);
+  assert.match(styles, /\.pf-library-content\{overflow-anchor:none\}/);
   assert.match(styles, /\.pf-media-grid--product \.pf-media-item>div\{position:relative;width:100%;height:auto;aspect-ratio:3\/2;overflow:hidden\}/);
   assert.match(styles, /\.pf-media-grid--product \.pf-media-item img\{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain\}/);
   assert.match(styles, /\.pf-library-panel\.is-management \.pf-media-grid--reference\{display:grid;grid-template-columns:repeat\(auto-fill,minmax\(220px,1fr\)\);grid-auto-rows:8px;gap:14px\}/);
