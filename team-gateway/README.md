@@ -33,6 +33,14 @@ npm run team-gateway:uninstall
 
 每个成员按 UTC 日期独立计数；默认每天 20 次，创建时传入 `unlimited` 表示不限制每日次数。令牌只在创建时显示一次，配置文件只保存 SHA-256 摘要。开发运行数据保存在被 Git 忽略的 `runtime/team-gateway/`，安装后的运行数据保存在 Application Support 目录。
 
+需要避免令牌出现在终端或聊天记录时，可以把一次性凭证写入权限为 `0600` 的本地文件：
+
+```bash
+PIXEL_FLOW_TEAM_CREDENTIAL_OUTPUT="runtime/伙伴1.json" \
+PIXEL_FLOW_TEAM_GATEWAY_URL="https://example.trycloudflare.com" \
+npm run team-gateway:token -- create 伙伴1 unlimited
+```
+
 ## 接口
 
 - `GET /health`：无需认证的最小健康状态。

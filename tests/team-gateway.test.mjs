@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -79,4 +79,25 @@ test("team gateway keeps Codex OAuth on the server and runs one queued job", asy
   assert.equal((await fetch(`${base}/jobs/${job.id}`, { method: "DELETE", headers })).status, 200);
   const stillLimited = await fetch(`${base}/jobs`, { method: "POST", headers, body: JSON.stringify({ requestId: "request-integration-3", prompt: "third image", images: [] }) });
   assert.equal(stillLimited.status, 429);
+});
+
+test("token CLI can save one-time credentials without printing the token", async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), "pixel-flow-token-test-"));
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  const configPath = join(temporary, "config.json");
+  const outputPath = join(temporary, "credentials.json");
+  const child = spawn(process.execPath, [fileURLToPath(new URL("../team-gateway/cli.mjs", import.meta.url)), "token", "create", "partner", "unlimited"], {
+    env: { ...process.env, PIXEL_FLOW_TEAM_CONFIG: configPath, PIXEL_FLOW_TEAM_CREDENTIAL_OUTPUT: outputPath, PIXEL_FLOW_TEAM_GATEWAY_URL: "https://example.trycloudflare.com" },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  const code = await new Promise((resolveCode, rejectCode) => { child.on("error", rejectCode); child.on("close", resolveCode); });
+  assert.equal(code, 0);
+  assert.doesNotMatch(stdout, /Token \(shown once\)/);
+  const credentials = JSON.parse(await readFile(outputPath, "utf8"));
+  assert.equal(credentials.gatewayUrl, "https://example.trycloudflare.com");
+  assert.equal(credentials.dailyLimit, null);
+  assert.match(credentials.token, /^pft_/);
+  assert.equal((await stat(outputPath)).mode & 0o777, 0o600);
 });
