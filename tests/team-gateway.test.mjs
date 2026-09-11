@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { createMemberToken, hashToken, normalizeGatewayUrl, sizeForRatio, tokenMatches, validateJobInput } from "../team-gateway/core.mjs";
+import { createMemberToken, hashToken, normalizeDailyLimit, normalizeGatewayUrl, sizeForRatio, tokenMatches, validateJobInput } from "../team-gateway/core.mjs";
 
 const serverSource = await readFile(new URL("../team-gateway/server.mjs", import.meta.url), "utf8");
 const manifest = JSON.parse(await readFile(new URL("../public/manifest.json", import.meta.url), "utf8"));
@@ -19,6 +19,10 @@ test("team gateway validates tokens, URLs, ratios and job inputs", () => {
   assert.equal(normalizeGatewayUrl("https://pixel.example.ts.net/"), "https://pixel.example.ts.net");
   assert.throws(() => normalizeGatewayUrl("file:///tmp/gateway"), /HTTP/);
   assert.equal(sizeForRatio("9:16"), "720x1280");
+  assert.equal(normalizeDailyLimit("unlimited"), null);
+  assert.equal(normalizeDailyLimit("不限"), null);
+  assert.equal(normalizeDailyLimit("25"), 25);
+  assert.throws(() => normalizeDailyLimit("invalid"), /每日额度/);
   assert.equal(validateJobInput({ requestId: "request-123", prompt: "cat", images: [] }).prompt, "cat");
   assert.throws(() => validateJobInput({ requestId: "short", prompt: "cat" }), /requestId/);
 });
@@ -26,6 +30,7 @@ test("team gateway validates tokens, URLs, ratios and job inputs", () => {
 test("team gateway keeps Codex OAuth on the server and runs one queued job", async (t) => {
   assert.match(serverSource, /PIXEL_FLOW_CODEX_IMAGE_SCRIPT/);
   assert.match(serverSource, /let running = false/);
+  assert.match(serverSource, /dailyLimit !== null && usageToday\(member\.id\) >= dailyLimit/);
   assert.match(serverSource, /status: "failed", error: "团队网关曾重启；为避免重复消耗额度，未自动重试"/);
   assert.ok(manifest.optional_host_permissions.includes("https://*/*"));
   assert.ok(manifest.host_permissions.includes("http://127.0.0.1:43130/*"));

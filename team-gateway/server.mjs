@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DAILY_LIMIT, MAX_INPUT_BYTES, dayKey, publicJob, sizeForRatio, tokenMatches, validateJobInput } from "./core.mjs";
+import { DEFAULT_DAILY_LIMIT, MAX_INPUT_BYTES, dayKey, normalizeDailyLimit, publicJob, sizeForRatio, tokenMatches, validateJobInput } from "./core.mjs";
 
 const host = process.env.PIXEL_FLOW_TEAM_HOST || "127.0.0.1";
 const port = Number(process.env.PIXEL_FLOW_TEAM_PORT || 43130);
@@ -183,14 +183,14 @@ const server = http.createServer(async (request, response) => {
     const member = await authenticate(request);
     if (!member) return sendJson(response, 401, { error: "团队令牌无效或已撤销" });
     if (request.method === "GET" && url.pathname === "/me") {
-      return sendJson(response, 200, { id: member.id, name: member.name, dailyLimit: member.dailyLimit ?? DEFAULT_DAILY_LIMIT, usedToday: usageToday(member.id) });
+      return sendJson(response, 200, { id: member.id, name: member.name, dailyLimit: normalizeDailyLimit(member.dailyLimit), usedToday: usageToday(member.id) });
     }
     if (request.method === "POST" && url.pathname === "/jobs") {
       const input = validateJobInput(await readJson(request));
       const existing = [...jobs.values()].find((job) => job.memberId === member.id && job.requestId === input.requestId);
       if (existing) return sendJson(response, 200, publicJob(existing, queuePosition(existing.id)));
-      const dailyLimit = Math.max(1, Number(member.dailyLimit || DEFAULT_DAILY_LIMIT));
-      if (usageToday(member.id) >= dailyLimit) return sendJson(response, 429, { error: `今日额度已用完（${dailyLimit} 次）` });
+      const dailyLimit = normalizeDailyLimit(member.dailyLimit);
+      if (dailyLimit !== null && usageToday(member.id) >= dailyLimit) return sendJson(response, 429, { error: `今日额度已用完（${dailyLimit} 次）` });
       await reserveUsage(member.id);
       const now = Date.now();
       const job = { id: randomUUID(), requestId: input.requestId, memberId: member.id, memberName: member.name, status: "queued", input, createdAt: now, updatedAt: now };

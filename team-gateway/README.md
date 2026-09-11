@@ -7,6 +7,7 @@
 ```bash
 npm run team-gateway:init
 npm run team-gateway:token -- create 同伴A 20
+npm run team-gateway:token -- create 不限额同伴 unlimited
 npm run team-gateway:install
 curl http://127.0.0.1:43130/health
 ```
@@ -30,7 +31,7 @@ npm run team-gateway:token -- revoke 同伴A
 npm run team-gateway:uninstall
 ```
 
-每个成员按 UTC 日期独立计数；默认每天 20 次。令牌只在创建时显示一次，配置文件只保存 SHA-256 摘要。开发运行数据保存在被 Git 忽略的 `runtime/team-gateway/`，安装后的运行数据保存在 Application Support 目录。
+每个成员按 UTC 日期独立计数；默认每天 20 次，创建时传入 `unlimited` 表示不限制每日次数。令牌只在创建时显示一次，配置文件只保存 SHA-256 摘要。开发运行数据保存在被 Git 忽略的 `runtime/team-gateway/`，安装后的运行数据保存在 Application Support 目录。
 
 ## 接口
 

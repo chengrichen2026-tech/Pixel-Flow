@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMemberToken, hashToken } from "./core.mjs";
+import { createMemberToken, hashToken, normalizeDailyLimit } from "./core.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const configPath = process.env.PIXEL_FLOW_TEAM_CONFIG || resolve(root, "runtime", "team-gateway", "config.json");
@@ -27,15 +27,15 @@ if (command === "init") {
   console.log(`Initialized ${configPath}`);
 } else if (command === "token" && action === "create") {
   const name = String(rawName || "").trim();
-  if (!name) throw new Error("用法：npm run team-gateway:token -- create 成员名 [每日额度]");
-  const dailyLimit = Math.max(1, Number(rest[0] || 20));
+  if (!name) throw new Error("用法：npm run team-gateway:token -- create 成员名 [每日额度|unlimited]");
+  const dailyLimit = normalizeDailyLimit(rest[0]);
   const config = await load();
   if (config.members.some((member) => member.name === name && member.active !== false)) throw new Error(`成员已存在：${name}`);
   const token = createMemberToken();
   config.members.push({ id: randomUUID(), name, tokenHash: hashToken(token), dailyLimit, active: true, createdAt: Date.now() });
   await save(config);
   console.log(`Member: ${name}`);
-  console.log(`Daily limit: ${dailyLimit}`);
+  console.log(`Daily limit: ${dailyLimit === null ? "unlimited" : dailyLimit}`);
   console.log(`Token (shown once): ${token}`);
 } else if (command === "token" && action === "revoke") {
   const name = String(rawName || "").trim();
@@ -52,7 +52,7 @@ if (command === "init") {
 } else {
   console.log("Commands:");
   console.log("  init");
-  console.log("  token create <name> [dailyLimit]");
+  console.log("  token create <name> [dailyLimit|unlimited]");
   console.log("  token revoke <name>");
   console.log("  members");
 }

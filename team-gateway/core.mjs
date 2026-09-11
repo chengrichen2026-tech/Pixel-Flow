@@ -11,6 +11,13 @@ export function createMemberToken() {
   return `pft_${randomBytes(24).toString("base64url")}`;
 }
 
+export function normalizeDailyLimit(value, fallback = DEFAULT_DAILY_LIMIT) {
+  if (value === null || value === 0 || value === "0" || value === "unlimited" || value === "不限") return null;
+  const parsed = Number(value === void 0 || value === "" ? fallback : value);
+  if (!Number.isInteger(parsed) || parsed < 1) throw new Error("每日额度必须是正整数或 unlimited");
+  return parsed;
+}
+
 export function tokenMatches(token, expectedHash) {
   const actual = Buffer.from(hashToken(token), "hex");
   const expected = Buffer.from(String(expectedHash || ""), "hex");
