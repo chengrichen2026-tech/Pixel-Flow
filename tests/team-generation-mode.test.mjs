@@ -36,6 +36,7 @@ test("macOS team gateway service scripts are present", async () => {
   assert.match(install, /com\.pixel-flow\.team-gateway/);
   assert.doesNotMatch(install, /<key>WorkingDirectory<\/key>/);
   assert.match(install, /--noproxy 127\.0\.0\.1/);
+  assert.match(install, /--retry-connrefused/);
   assert.match(install, /Library\/Application Support\/Pixel Flow Team Gateway/);
   assert.match(install, /127\.0\.0\.1:43130\/health/);
   assert.match(uninstall, /launchctl bootout/);

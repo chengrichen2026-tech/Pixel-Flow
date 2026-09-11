@@ -52,4 +52,4 @@ if ! launchctl bootstrap "$user_domain" "$service_plist"; then
 fi
 launchctl enable "$user_domain/$service_label"
 launchctl kickstart -k "$user_domain/$service_label"
-curl --noproxy 127.0.0.1 --fail --silent --show-error --retry 10 --retry-delay 1 http://127.0.0.1:43130/health
+curl --noproxy 127.0.0.1 --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:43130/health
