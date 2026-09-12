@@ -6978,6 +6978,18 @@ function bytesToBase64(buffer) {
   }
   return btoa(binary);
 }
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+async function sha256Hex(buffer) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", buffer));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 async function waitForTabReady(tabId) {
   const current = await chrome.tabs.get(tabId);
   if (current.status === "complete") return;
@@ -7132,7 +7144,8 @@ async function submitTeamGatewayJob(input) {
       requestId: input.requestId,
       prompt: input.prompt,
       ratio: input.ratio,
-      imageCount: images.length
+      imageCount: images.length,
+      resultDelivery: Number(health.protocolVersion || 1) >= 3 ? "direct" : void 0
     })
   });
   try {
@@ -7165,6 +7178,22 @@ async function downloadTeamGatewayImages(job) {
   const images = Array.isArray(job.images) ? job.images : [];
   if (images.every((image) => typeof image.base64 === "string")) return images;
   return Promise.all(images.map(async (image, fallbackIndex) => {
+    if (typeof image.downloadUrl === "string") {
+      if (!image.downloadUrl.startsWith("https://")) throw new Error("团队生图直传地址无效");
+      const response = await fetch(image.downloadUrl, { cache: "no-store" });
+      if (!response.ok) throw new Error(`团队生图直传下载返回 HTTP ${response.status}`);
+      const buffer = await response.arrayBuffer();
+      if (Number.isInteger(image.byteLength) && buffer.byteLength !== image.byteLength) {
+        throw new Error("团队生图直传文件大小校验失败");
+      }
+      if (typeof image.sha256 === "string" && await sha256Hex(buffer) !== image.sha256) {
+        throw new Error("团队生图直传文件完整性校验失败");
+      }
+      return {
+        base64: bytesToBase64(buffer),
+        mimeType: image.mimeType || response.headers.get("Content-Type") || "image/png"
+      };
+    }
     const imageIndex = Number.isInteger(image.imageIndex) ? image.imageIndex : fallbackIndex;
     const chunks = [];
     for (let chunkIndex = 0; chunkIndex < image.totalChunks; chunkIndex += 1) {
@@ -7177,6 +7206,51 @@ async function downloadTeamGatewayImages(job) {
       mimeType: image.mimeType || "image/png"
     };
   }));
+}
+async function createTeamPreview(image) {
+  if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") return null;
+  const source = new Blob([base64ToBytes(image.base64)], { type: image.mimeType || "image/png" });
+  const bitmap = await createImageBitmap(source);
+  try {
+    const scale = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(bitmap, 0, 0, width, height);
+    const preview = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.78 });
+    return {
+      base64: bytesToBase64(await preview.arrayBuffer()),
+      mimeType: "image/jpeg"
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+async function finalizeTeamGatewayJob(jobId, images) {
+  try {
+    const preview = images[0] ? await createTeamPreview(images[0]) : null;
+    if (preview) {
+      const totalChunks = Math.max(1, Math.ceil(preview.base64.length / TEAM_GATEWAY_CHUNK_CHARACTERS));
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+        await teamGatewayRequest(`/jobs/${jobId}/preview-chunks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageIndex: 0,
+            chunkIndex,
+            totalChunks,
+            name: "preview-1.jpg",
+            mimeType: preview.mimeType,
+            base64: preview.base64.slice(chunkIndex * TEAM_GATEWAY_CHUNK_CHARACTERS, (chunkIndex + 1) * TEAM_GATEWAY_CHUNK_CHARACTERS)
+          })
+        });
+      }
+    }
+  } catch {
+  }
+  await teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" });
 }
 async function waitForApiWorkerJob(jobId) {
   while (true) {
@@ -7209,7 +7283,7 @@ async function recoverTeamTaskResult(projectId, taskId, jobId) {
   const images = await downloadTeamGatewayImages(job);
   if (!images.length) throw new Error("云端任务没有可恢复的图片");
   await persistAndBroadcast({ type: "TASK_RESULT", projectId, taskId, images, responseText: "" });
-  void teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" }).catch(() => {});
+  await finalizeTeamGatewayJob(jobId, images).catch(() => {});
   return { recovered: true, resultCount: images.length, jobId };
 }
 async function executeApiTask(projectId, taskId, project, task) {
@@ -7332,7 +7406,7 @@ async function executeTeamTask(projectId, taskId, project, task) {
       return true;
     });
     if (!handled) return;
-    void teamGatewayRequest(`/jobs/${jobId}/acknowledge`, { method: "POST" }).catch(() => {});
+    await finalizeTeamGatewayJob(jobId, images).catch(() => {});
     await chrome.notifications.create(createTaskNotificationId(projectId, taskId), {
       type: "basic",
       iconUrl: chrome.runtime.getURL("icon.svg"),

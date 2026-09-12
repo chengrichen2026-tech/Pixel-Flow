@@ -18,6 +18,12 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
   assert.match(background, /async function submitTeamGatewayJob\(input\)/);
   assert.match(background, /protocolVersion/);
+  assert.match(background, /resultDelivery: Number\(health\.protocolVersion \|\| 1\) >= 3 \? "direct"/);
+  assert.match(background, /image\.downloadUrl/);
+  assert.match(background, /团队生图直传文件完整性校验失败/);
+  assert.match(background, /async function finalizeTeamGatewayJob/);
+  assert.match(background, /\/preview-chunks/);
+  assert.match(background, /createImageBitmap/);
   assert.match(background, /\/input-chunks/);
   assert.match(background, /async function downloadTeamGatewayImages\(job\)/);
   assert.match(background, /\/result-chunks\//);
