@@ -7136,6 +7136,9 @@ async function submitTeamGatewayJob(input) {
       body: JSON.stringify(input)
     });
   }
+  if (Number(health.protocolVersion || 1) < 4) {
+    throw new Error("团队任务箱版本过旧，暂不支持 Flare / Sunburst 模型选择");
+  }
   const images = Array.isArray(input.images) ? input.images : [];
   const submitted = await teamGatewayRequest("/jobs", {
     method: "POST",
@@ -7145,7 +7148,8 @@ async function submitTeamGatewayJob(input) {
       prompt: input.prompt,
       ratio: input.ratio,
       imageCount: images.length,
-      resultDelivery: Number(health.protocolVersion || 1) >= 3 ? "direct" : void 0
+      resultDelivery: "direct",
+      imageModel: input.imageModel === "sunburst" ? "sunburst" : "flare"
     })
   });
   try {
@@ -7386,6 +7390,7 @@ async function executeTeamTask(projectId, taskId, project, task) {
         requestId: `${projectId}:${taskId}:${Date.now()}`,
         prompt,
         ratio: task.aspectRatio ?? "auto",
+        imageModel: task.teamImageModel === "sunburst" ? "sunburst" : "flare",
         images: await Promise.all(imageBlobs.map(async (item) => ({
           name: item.name,
           mimeType: item.blob.type || "image/png",

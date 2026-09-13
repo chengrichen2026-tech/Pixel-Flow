@@ -10,24 +10,29 @@ test("rebuilt tasks own generation mode instead of requiring DOM injection", asy
   const store = await readFile(new URL("src/store.ts", root), "utf8");
   assert.match(types, /export type GenerationMode = "browser" \| "api" \| "team"/);
   assert.match(types, /generationMode\?: GenerationMode/);
+  assert.match(types, /export type TeamImageModel = "flare" \| "sunburst"/);
+  assert.match(types, /teamImageModel\?: TeamImageModel/);
   assert.match(types, /apiJobId\?: string/);
   assert.match(store, /generationMode:"api"/);
   assert.match(app, /className="generation-mode"/);
   assert.match(app, /aria-label="生图模式"/);
   assert.match(app, /n\.generationMode==='api'\?'api':n\.generationMode==='team'\?'team':'browser'/);
   assert.match(app, /<option value="team">团队生图<\/option>/);
+  assert.match(app, /className="team-model-toggle"/);
+  assert.match(app, /value==='flare'\?'Flare':'Sunburst'/);
+  assert.match(app, /aria-label="团队生图模型"/);
 });
 
 test("rebuilt mode switching preserves production safety rules", async () => {
   const app = await readFile(new URL("src/App.tsx", root), "utf8");
   assert.match(app, /\['queued','waiting_page','uploading','sending','generating','manual_action'\]\.includes\(status\)/);
-  assert.match(app, /generationMode:next,apiJobId:undefined,statusDetail:undefined/);
+  assert.match(app, /generationMode:next,teamImageModel:next==='team'/);
   assert.match(app, /currentMode==='api'&&!await readApiKey\(\)/);
   assert.match(app, /currentMode==='team'&&!await hasTeamGateway\(\)/);
   assert.match(app, /pixel-flow:open-api-settings/);
-  assert.match(app, /const pendingModeSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
-  assert.match(app, /pendingModeSave\.current=saving;await saving/);
-  assert.match(app, /const run=async\(\)=>\{await pendingModeSave\.current/);
+  assert.match(app, /const pendingSettingsSave=useRef<Promise<void>>\(Promise\.resolve\(\)\)/);
+  assert.match(app, /pendingSettingsSave\.current=saving;await saving/);
+  assert.match(app, /const run=async\(\)=>\{await pendingSettingsSave\.current/);
   assert.match(app, /const currentTask=useStore\.getState\(\)\.project/);
   assert.match(app, /currentTask\?\.generationMode==='team'\?'team':'browser'/);
 });

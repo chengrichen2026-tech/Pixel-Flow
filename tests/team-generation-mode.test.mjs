@@ -18,7 +18,10 @@ test("team mode sends authenticated jobs without exposing Codex OAuth to the ext
   assert.match(background, /requestId: `\$\{projectId\}:\$\{taskId\}:\$\{Date\.now\(\)\}`/);
   assert.match(background, /async function submitTeamGatewayJob\(input\)/);
   assert.match(background, /protocolVersion/);
-  assert.match(background, /resultDelivery: Number\(health\.protocolVersion \|\| 1\) >= 3 \? "direct"/);
+  assert.match(background, /Number\(health\.protocolVersion \|\| 1\) < 4/);
+  assert.match(background, /resultDelivery: "direct"/);
+  assert.match(background, /imageModel: input\.imageModel === "sunburst" \? "sunburst" : "flare"/);
+  assert.match(background, /imageModel: task\.teamImageModel === "sunburst" \? "sunburst" : "flare"/);
   assert.match(background, /image\.downloadUrl/);
   assert.match(background, /团队生图直传文件完整性校验失败/);
   assert.match(background, /async function finalizeTeamGatewayJob/);
@@ -52,7 +55,9 @@ test("team jobs recover through the persistent worker path", () => {
 
 test("structured commands can create team generation tasks", () => {
   assert.match(bridge, /command\.generationMode==="team"\?"team":"api"/);
+  assert.match(bridge, /command\.teamImageModel==="sunburst"\?"sunburst":"flare"/);
   assert.match(mcp, /enum:\["api","browser","team"\]/);
+  assert.match(mcp, /teamImageModel:\{type:"string",enum:\["flare","sunburst"\]\}/);
 });
 
 test("macOS team gateway service scripts are present", async () => {
