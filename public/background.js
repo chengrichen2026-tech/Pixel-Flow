@@ -8031,8 +8031,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
   if (raw?.type === "TEAM_WEB_WORKER_SETTINGS_CHANGED") {
-    void teamWebWorkerTick().then(() => sendResponse({ accepted: true }), (error) => sendResponse({ accepted: false, error: String(error) }));
-    return true;
+    sendResponse({ accepted: true });
+    void teamWebWorkerTick();
+    return false;
   }
   if (!isExtensionMessage(raw)) return false;
   const message = raw;

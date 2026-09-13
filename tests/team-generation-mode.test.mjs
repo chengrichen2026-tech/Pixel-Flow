@@ -68,6 +68,7 @@ test("remote team web jobs reuse the existing ChatGPT adapter and return chunks"
   assert.match(background, /uploadTeamWebImage\(active\.job\.id, message\.images\[imageIndex\], "result-chunks"/);
   assert.match(background, /pixelFlowTeamWebWorkerEnabled: false/);
   assert.match(background, /TEAM_WEB_WORKER_ALARM/);
+  assert.match(background, /sendResponse\(\{ accepted: true \}\);[\s\S]*void teamWebWorkerTick\(\)/);
   assert.doesNotMatch(background, /run_chatgpt_web\.py/);
 });
 

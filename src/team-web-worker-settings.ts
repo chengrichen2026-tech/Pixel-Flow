@@ -60,7 +60,7 @@ export async function pairTeamWebWorker(relayValue: string, pairingValue: string
     [DEVICE_NAME_STORAGE]: name,
     [ENABLED_STORAGE]: true
   });
-  await chrome.runtime.sendMessage({ type: "TEAM_WEB_WORKER_SETTINGS_CHANGED" }).catch(() => undefined);
+  void chrome.runtime.sendMessage({ type: "TEAM_WEB_WORKER_SETTINGS_CHANGED" }).catch(() => undefined);
   return payload;
 }
 
@@ -68,7 +68,7 @@ export async function setTeamWebWorkerEnabled(enabled: boolean) {
   const current = await readTeamWebWorker();
   if (enabled && (!current.relayUrl || !current.deviceToken || !current.workerId)) throw new Error("请先完成网页生图机配对");
   await chrome.storage.local.set({ [ENABLED_STORAGE]: enabled });
-  await chrome.runtime.sendMessage({ type: "TEAM_WEB_WORKER_SETTINGS_CHANGED" }).catch(() => undefined);
+  void chrome.runtime.sendMessage({ type: "TEAM_WEB_WORKER_SETTINGS_CHANGED" }).catch(() => undefined);
 }
 
 export async function clearTeamWebWorker() {
@@ -79,5 +79,5 @@ export async function clearTeamWebWorker() {
     DEVICE_NAME_STORAGE,
     ENABLED_STORAGE
   ]);
-  await chrome.runtime.sendMessage({ type: "TEAM_WEB_WORKER_SETTINGS_CHANGED" }).catch(() => undefined);
+  void chrome.runtime.sendMessage({ type: "TEAM_WEB_WORKER_SETTINGS_CHANGED" }).catch(() => undefined);
 }

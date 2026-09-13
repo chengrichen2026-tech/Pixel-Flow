@@ -72,6 +72,7 @@ test("web worker pairing keeps the ChatGPT session local and exposes pause contr
   assert.match(settings, /pixelFlowTeamWebWorkerDeviceToken/);
   assert.match(settings, /\/web-worker\/pair/);
   assert.match(settings, /TEAM_WEB_WORKER_SETTINGS_CHANGED/);
+  assert.match(settings, /void chrome\.runtime\.sendMessage/);
   assert.match(settings, /pfw_/);
   assert.match(app, /网页生图执行机/);
   assert.match(app, /配对并开始接单/);
