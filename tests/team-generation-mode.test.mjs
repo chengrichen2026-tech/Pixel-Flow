@@ -70,6 +70,11 @@ test("remote team web jobs reuse the existing ChatGPT adapter and return chunks"
   assert.match(background, /TEAM_WEB_WORKER_ALARM/);
   assert.match(background, /sendResponse\(\{ accepted: true \}\);[\s\S]*void teamWebWorkerTick\(\)/);
   assert.doesNotMatch(background, /run_chatgpt_web\.py/);
+  assert.ok(
+    background.indexOf("var teamWebWorkerReady = Promise.all")
+      < background.indexOf("void teamWebWorkerReady.then"),
+    "team web worker startup must run after its readiness promise is assigned",
+  );
 });
 
 test("macOS team gateway service scripts are present", async () => {

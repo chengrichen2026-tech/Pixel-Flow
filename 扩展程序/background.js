@@ -6952,7 +6952,6 @@ var schedulerReady = chrome.storage.session.get(["schedulerState", "activeTaskTa
 void schedulerReady.then(() => {
   if (browserTaskMessages.size > 0) scheduleBrowserResultRecoveryAlarm();
 });
-void teamWebWorkerReady.then(() => teamWebWorkerTick()).catch(() => void 0);
 async function saveBrowserTaskMessages() {
   await chrome.storage.session.set({ browserTaskMessages: [...browserTaskMessages] });
 }
@@ -7073,6 +7072,7 @@ var teamWebWorkerReady = Promise.all([
   tabRegistry.map(key, void 0, conversationUrl);
   scheduleBrowserResultRecoveryAlarm();
 });
+void teamWebWorkerReady.then(() => teamWebWorkerTick()).catch(() => void 0);
 function scheduleApiRecoveryAlarm() {
   chrome.alarms.create(API_RECOVERY_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
 }
